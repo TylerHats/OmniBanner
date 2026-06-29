@@ -1,6 +1,8 @@
 import smtplib
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
 
 def build_nice_email_html(app_name: str, primary_color: str, notice_text: str, start_time: str, end_time: str, target_sites: str = None) -> str:
     targets_label = "All Sites"
