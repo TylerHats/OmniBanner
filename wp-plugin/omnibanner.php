@@ -23,9 +23,12 @@ class OmniBannerPlugin {
         // Frontend hooks
         add_action('wp_enqueue_scripts', array($this, 'enqueue_frontend_assets'));
         
-        // AJAX hook to refresh branding configuration
+        // AJAX hooks
         add_action('wp_ajax_omnibanner_refresh_branding', array($this, 'ajax_refresh_branding'));
+        add_action('wp_ajax_omnibanner_run_diagnostics', array($this, 'ajax_run_diagnostics'));
+        add_action('wp_ajax_omnibanner_flush_cache', array($this, 'ajax_flush_cache'));
     }
+
 
     public function add_admin_menu() {
         // Fetch cached brand name
@@ -132,6 +135,43 @@ class OmniBannerPlugin {
                     <?php submit_button('Save Settings'); ?>
                 </form>
             </div>
+
+            <div class="card omnibanner-card" style="margin-top: 20px;">
+                <h2 class="title">Integration Diagnostics</h2>
+                <p>Verify network configurations and test connection response limits with the central service.</p>
+                
+                <table class="widefat fixed striped" style="margin-top: 15px; margin-bottom: 15px; border-radius: 4px; overflow: hidden;">
+                    <thead>
+                        <tr>
+                            <th style="width: 250px; font-weight:600; padding: 10px;">Diagnostic Test Item</th>
+                            <th style="font-weight:600; padding: 10px;">Check Status</th>
+                            <th style="width: 100px; font-weight:600; text-align: right; padding: 10px;">Latency</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding: 10px;"><strong>Endpoint Connectivity check</strong></td>
+                            <td id="diag-status-conn" style="padding: 10px;"><span class="diag-badge gray">Not Tested</span></td>
+                            <td id="diag-time-conn" style="text-align: right; color: #888; padding: 10px;">-</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px;"><strong>Branding Information query</strong></td>
+                            <td id="diag-status-info" style="padding: 10px;"><span class="diag-badge gray">Not Tested</span></td>
+                            <td id="diag-time-info" style="text-align: right; color: #888; padding: 10px;">-</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px;"><strong>Active Banner endpoint ping</strong></td>
+                            <td id="diag-status-banner" style="padding: 10px;"><span class="diag-badge gray">Not Tested</span></td>
+                            <td id="diag-time-banner" style="text-align: right; color: #888; padding: 10px;">-</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="button button-primary" id="omnibanner-run-diag-btn">🔬 Run Diagnostics Suite</button>
+                    <button type="button" class="button button-secondary" id="omnibanner-flush-btn">🗑️ Flush Cached Assets</button>
+                </div>
+            </div>
         </div>
         <?php
     }
@@ -186,6 +226,78 @@ class OmniBannerPlugin {
             'color' => sanitize_hex_color($data['color'])
         ));
     }
+
+    public function ajax_run_diagnostics() {
+        check_ajax_referer('omnibanner_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Unauthorized access'));
+        }
+
+        $api_url = isset($_POST['api_url']) ? esc_url_raw($_POST['api_url']) : '';
+        if (empty($api_url)) {
+            wp_send_json_error(array('message' => 'Empty API URL'));
+        }
+
+        $report = array();
+        
+        // 1. Connection check
+        $t1 = microtime(true);
+        $res1 = wp_remote_get(rtrim($api_url, '/'), array('timeout' => 5, 'sslverify' => false));
+        $d1 = round((microtime(true) - $t1) * 1000);
+        if (is_wp_error($res1)) {
+            $report['conn'] = array('status' => 'failed', 'message' => $res1->get_error_message(), 'time' => $d1);
+        } else {
+            $code = wp_remote_retrieve_response_code($res1);
+            $report['conn'] = array('status' => 'success', 'message' => 'Connected (HTTP ' . $code . ')', 'time' => $d1);
+        }
+
+        // 2. Info Check
+        $t2 = microtime(true);
+        $res2 = wp_remote_get(rtrim($api_url, '/') . '/api/public/info', array('timeout' => 5, 'sslverify' => false));
+        $d2 = round((microtime(true) - $t2) * 1000);
+        if (is_wp_error($res2)) {
+            $report['info'] = array('status' => 'failed', 'message' => $res2->get_error_message(), 'time' => $d2);
+        } else {
+            $code = wp_remote_retrieve_response_code($res2);
+            if ($code === 200) {
+                $report['info'] = array('status' => 'success', 'message' => 'Active', 'time' => $d2);
+            } else {
+                $report['info'] = array('status' => 'failed', 'message' => 'HTTP ' . $code, 'time' => $d2);
+            }
+        }
+
+        // 3. Banner Check
+        $t3 = microtime(true);
+        $domain = parse_url(home_url(), PHP_URL_HOST);
+        $res3 = wp_remote_get(rtrim($api_url, '/') . '/api/public/banner?domain=' . esc_attr($domain), array('timeout' => 5, 'sslverify' => false));
+        $d3 = round((microtime(true) - $t3) * 1000);
+        if (is_wp_error($res3)) {
+            $report['banner'] = array('status' => 'failed', 'message' => $res3->get_error_message(), 'time' => $d3);
+        } else {
+            $code = wp_remote_retrieve_response_code($res3);
+            if ($code === 200) {
+                $report['banner'] = array('status' => 'success', 'message' => 'Active', 'time' => $d3);
+            } else {
+                $report['banner'] = array('status' => 'failed', 'message' => 'HTTP ' . $code, 'time' => $d3);
+            }
+        }
+
+        wp_send_json_success($report);
+    }
+
+    public function ajax_flush_cache() {
+        check_ajax_referer('omnibanner_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Unauthorized access'));
+        }
+
+        update_option('omnibanner_cached_name', 'OmniBanner');
+        update_option('omnibanner_cached_icon', '');
+        update_option('omnibanner_cached_color', '#8b5cf6');
+
+        wp_send_json_success(array('message' => 'Cache flushed successfully'));
+    }
 }
 
 new OmniBannerPlugin();
+

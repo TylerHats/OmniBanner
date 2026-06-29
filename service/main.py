@@ -1,10 +1,12 @@
 import os
 import json
+import csv
+import io
 import asyncio
 from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, Depends, Request, Response, Form, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Depends, Request, Response, Form, HTTPException, status, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +16,7 @@ from database import init_db, SessionLocal, SystemConfig, User, Notice, SMTPSett
 import auth
 import smtp
 import kuma
+
 
 app = FastAPI(title="OmniBanner Central Service")
 
@@ -432,7 +435,7 @@ async def create_notice(data: dict, user: User = Depends(get_current_user_cookie
     end_dt = datetime.fromisoformat(data.get("scheduled_end"))
     
     notice = Notice(
-        text=data.get("text"),
+        banner_text=data.get("banner_text") or data.get("text"),
         bg_color=data.get("bg_color", "#ef4444"),
         text_color=data.get("text_color", "#ffffff"),
         display_duration=int(data.get("display_duration", 0)),
@@ -445,7 +448,10 @@ async def create_notice(data: dict, user: User = Depends(get_current_user_cookie
         send_smtp=data.get("send_smtp", False),
         uptime_kuma_integration=data.get("uptime_kuma_integration", False),
         uptime_kuma_push_url=data.get("uptime_kuma_push_url"),
-        uptime_kuma_monitor_ids=data.get("uptime_kuma_monitor_ids")
+        uptime_kuma_monitor_ids=data.get("uptime_kuma_monitor_ids"),
+        kuma_text=data.get("kuma_text"),
+        email_subject=data.get("email_subject"),
+        email_text=data.get("email_text")
     )
     
     db.add(notice)
@@ -462,7 +468,7 @@ async def update_notice(notice_id: int, data: dict, user: User = Depends(get_cur
     if not notice:
         raise HTTPException(status_code=404, detail="Notice not found")
         
-    notice.text = data.get("text")
+    notice.banner_text = data.get("banner_text") or data.get("text")
     notice.bg_color = data.get("bg_color")
     notice.text_color = data.get("text_color")
     notice.display_duration = int(data.get("display_duration", 0))
@@ -476,6 +482,9 @@ async def update_notice(notice_id: int, data: dict, user: User = Depends(get_cur
     notice.uptime_kuma_integration = data.get("uptime_kuma_integration", False)
     notice.uptime_kuma_push_url = data.get("uptime_kuma_push_url")
     notice.uptime_kuma_monitor_ids = data.get("uptime_kuma_monitor_ids")
+    notice.kuma_text = data.get("kuma_text")
+    notice.email_subject = data.get("email_subject")
+    notice.email_text = data.get("email_text")
     
     # If timeframe shifted back, reset smtp_sent to allow resending
     # or keep as is. Let's reset so they receive updates.
@@ -593,6 +602,63 @@ async def delete_subscriber(sub_id: int, user: User = Depends(get_current_user_c
     db.delete(sub)
     db.commit()
     return {"success": True}
+
+@app.post("/api/subscribers/import")
+async def import_subscribers(file: UploadFile = File(...), user: User = Depends(get_current_user_cookie), db: Session = Depends(get_db)):
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    content = await file.read()
+    text_data = content.decode("utf-8")
+    f = io.StringIO(text_data)
+    reader = csv.reader(f)
+    
+    imported = 0
+    for row in reader:
+        if not row:
+            continue
+        if row[0].lower() == "email":
+            continue
+            
+        email = row[0].strip()
+        name = row[1].strip() if len(row) > 1 else ""
+        
+        if not email or "@" not in email:
+            continue
+            
+        existing = db.query(Subscriber).filter(Subscriber.email == email).first()
+        if existing:
+            existing.active = True
+            existing.name = name
+        else:
+            sub = Subscriber(email=email, name=name, active=True)
+            db.add(sub)
+        imported += 1
+        
+    db.commit()
+    return {"success": True, "count": imported}
+
+@app.get("/api/subscribers/export")
+async def export_subscribers(user: User = Depends(get_current_user_cookie), db: Session = Depends(get_db)):
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    subscribers = db.query(Subscriber).filter(Subscriber.active == True).all()
+    
+    f = io.StringIO()
+    writer = csv.writer(f)
+    writer.writerow(["email", "name"])
+    for s in subscribers:
+        writer.writerow([s.email, s.name or ""])
+        
+    f.seek(0)
+    response = StreamingResponse(
+        iter([f.getvalue()]),
+        media_type="text/csv"
+    )
+    response.headers["Content-Disposition"] = "attachment; filename=subscribers.csv"
+    return response
+
 
 # --- KUMA API ---
 
@@ -718,15 +784,28 @@ async def get_public_banner(domain: Optional[str] = None, db: Session = Depends(
     if not matched_notice:
         return JSONResponse(content={}, status_code=200)
         
+    # Increment views
+    matched_notice.views_count += 1
+    db.commit()
+    
     return {
         "id": matched_notice.id,
-        "text": matched_notice.text,
+        "text": matched_notice.banner_text,
         "bg_color": matched_notice.bg_color,
         "text_color": matched_notice.text_color,
         "display_duration": matched_notice.display_duration,
         "dismissible": matched_notice.dismissible,
         "dismiss_cooldown": matched_notice.dismiss_cooldown
     }
+
+@app.post("/api/public/banner/{notice_id}/dismiss")
+async def dismiss_public_banner(notice_id: int, db: Session = Depends(get_db)):
+    notice = db.query(Notice).filter(Notice.id == notice_id).first()
+    if notice:
+        notice.dismiss_count += 1
+        db.commit()
+    return {"success": True}
+
 
 # --- BACKGROUND SYSTEM SCHEDULER TASK ---
 
@@ -758,13 +837,13 @@ async def notification_scheduler_loop():
                         email_body = smtp.build_nice_email_html(
                             app_name=app_name,
                             primary_color=color,
-                            notice_text=notice.text,
+                            notice_text=notice.email_text or notice.banner_text,
                             start_time=notice.scheduled_start.strftime("%Y-%m-%d %H:%M:%S"),
                             end_time=notice.scheduled_end.strftime("%Y-%m-%d %H:%M:%S"),
                             target_sites=notice.target_sites if notice.target_type == "domains" else None
                         )
                         
-                        subject = f"[{app_name}] Scheduled Maintenance Notice: {notice.text[:50]}"
+                        subject = notice.email_subject or f"[{app_name}] Scheduled Maintenance Notice: {notice.banner_text[:50]}"
                         
                         smtp_data = {
                             "host": smtp_conf.host,
@@ -783,11 +862,10 @@ async def notification_scheduler_loop():
                     db.commit()
             
             # 2. Uptime Kuma push webhooks sync
-            # Scan notices that JUST started or ended in the last minute (or sync every cycle)
             for notice in active_notices:
                 if notice.uptime_kuma_integration and notice.uptime_kuma_push_url:
                     # Ping push URL saying monitor is down/in maintenance
-                    await kuma.ping_kuma_push_url(notice.uptime_kuma_push_url, is_active=True, msg=notice.text)
+                    await kuma.ping_kuma_push_url(notice.uptime_kuma_push_url, is_active=True, msg=notice.kuma_text or notice.banner_text)
                     
             # Find expired notices in the last 2 minutes that had Kuma enabled
             expired_notices = db.query(Notice).filter(
@@ -803,6 +881,7 @@ async def notification_scheduler_loop():
             print(f"Scheduler Loop Error: {e}")
             
         await asyncio.sleep(60) # Loop check every 60 seconds
+
 
 @app.on_event("startup")
 async def startup_event():

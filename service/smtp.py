@@ -5,9 +5,14 @@ from email.mime.text import MIMEText
 
 
 def build_nice_email_html(app_name: str, primary_color: str, notice_text: str, start_time: str, end_time: str, target_sites: str = None) -> str:
+    # Convert newlines to HTML breaks for formatting
+    if notice_text:
+        notice_text = notice_text.replace("\n", "<br>")
+        
     targets_label = "All Sites"
     if target_sites:
         targets_label = ", ".join([site.strip() for site in target_sites.split(",") if site.strip()])
+
     
     # Emojis are supported out of the box because of UTF-8 encoding
     html = f"""<!DOCTYPE html>

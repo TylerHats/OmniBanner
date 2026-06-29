@@ -61,7 +61,7 @@
             closeBtn.setAttribute('aria-label', 'Dismiss banner');
             closeBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                dismissBanner(banner, data.dismiss_cooldown, cooldownKey);
+                dismissBanner(banner, data.id, data.dismiss_cooldown, cooldownKey);
             });
             banner.appendChild(closeBtn);
         }
@@ -79,16 +79,20 @@
         // Handle auto-dismiss duration timer
         if (data.display_duration > 0) {
             setTimeout(() => {
-                dismissBanner(banner, data.dismiss_cooldown, cooldownKey, false); // Auto dismiss doesn't block re-displays necessarily if user didn't hit Close, but it is best to set dismiss timestamp too
+                dismissBanner(banner, data.id, data.dismiss_cooldown, cooldownKey, false);
             }, data.display_duration * 1000);
         }
     }
 
-    function dismissBanner(bannerEl, cooldownHours, cooldownKey, applyCooldown = true) {
+    function dismissBanner(bannerEl, bannerId, cooldownHours, cooldownKey, applyCooldown = true) {
         if (applyCooldown) {
             const now = new Date().getTime();
             const expires = now + (cooldownHours * 60 * 60 * 1000);
             localStorage.setItem(cooldownKey, expires);
+
+            // Post dismiss event to backend analytics
+            const dismissUrl = `${api_url.replace(/\/$/, '')}/api/public/banner/${bannerId}/dismiss`;
+            fetch(dismissUrl, { method: 'POST', mode: 'cors' }).catch(() => {});
         }
 
         // Add slide-up transition classes

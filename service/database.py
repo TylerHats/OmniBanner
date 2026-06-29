@@ -32,7 +32,7 @@ class User(Base):
 class Notice(Base):
     __tablename__ = "notices"
     id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text)
+    banner_text = Column(Text)
     text_color = Column(String, default="#ffffff")
     bg_color = Column(String, default="#ef4444")
     display_duration = Column(Integer, default=0) # 0 for persistent, >0 for display seconds
@@ -47,6 +47,12 @@ class Notice(Base):
     uptime_kuma_integration = Column(Boolean, default=False)
     uptime_kuma_push_url = Column(String, nullable=True)
     uptime_kuma_monitor_ids = Column(String, nullable=True) # comma-separated list of monitor IDs
+    kuma_text = Column(Text, nullable=True)
+    email_subject = Column(String, nullable=True)
+    email_text = Column(Text, nullable=True)
+    views_count = Column(Integer, default=0)
+    dismiss_count = Column(Integer, default=0)
+
 
 class SMTPSettings(Base):
     __tablename__ = "smtp_settings"

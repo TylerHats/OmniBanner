@@ -584,3 +584,50 @@ tr:hover td {
 .align-center {
     align-items: center;
 }
+
+/* Custom Preview Overrides */
+.preview-viewport-pane {
+    display: none;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.preview-tabs .tab-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-weight: 500;
+    transition: all 0.2s;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.preview-tabs .tab-btn.active {
+    background-color: var(--border-color);
+    color: var(--text-main);
+}
+
+.kuma-sim-card h1, .kuma-sim-card h2, .kuma-sim-card h3 {
+    margin-top: 10px;
+    margin-bottom: 5px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #58A6FF;
+}
+
+.kuma-sim-card p {
+    margin-bottom: 8px;
+}
+
+.kuma-sim-card code {
+    background-color: #21262D;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85em;
+}
+
+.kuma-sim-card ul, .kuma-sim-card ol {
+    margin-left: 20px;
+    margin-bottom: 10px;
+}
+
