@@ -1,0 +1,6 @@
+{
+  "app_name": "OmniBanner",
+  "app_icon_url": "/static/brand/logo.png",
+  "primary_color": "#8b5cf6",
+  "theme": "dark"
+}

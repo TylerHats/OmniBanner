@@ -1,0 +1,807 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Tab Nav Bar -->
+    <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('tab-banners')">📢 Notice Banners</button>
+        <button class="tab-btn" onclick="switchTab('tab-smtp')">✉️ SMTP & Subscribers</button>
+        <button class="tab-btn" onclick="switchTab('tab-kuma')">🟢 Uptime Kuma</button>
+        <button class="tab-btn" onclick="switchTab('tab-branding')">⚙️ Branding & Security</button>
+    </div>
+
+    <!-- TAB 1: Banners -->
+    <div class="tab-pane active" id="tab-banners">
+        <div class="editor-layout">
+            <!-- Left: Edit notice -->
+            <div class="card">
+                <div class="card-title">
+                    <span id="editor-action-title">Create Scheduled Notice</span>
+                    <button class="btn btn-secondary" onclick="resetNoticeForm()" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Reset Form</button>
+                </div>
+                
+                <form id="notice-form" onsubmit="saveNotice(event)">
+                    <input type="hidden" id="notice-id" name="id">
+                    
+                    <div class="form-group">
+                        <label for="text">Notice Text (Supports emojis & inline HTML links)</label>
+                        <textarea id="notice-text" name="text" class="form-control" rows="3" placeholder="⚠️ Scheduled maintenance in progress. Emojis and links <a href='#'>like this</a> are supported!" required></textarea>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="bg_color">Background Color</label>
+                            <input type="color" id="notice-bg-color" name="bg_color" class="form-control" value="#ef4444" style="height: 42px; padding: 3px; cursor: pointer;">
+                        </div>
+                        <div class="form-group">
+                            <label for="text_color">Text Color</label>
+                            <input type="color" id="notice-text-color" name="text_color" class="form-control" value="#ffffff" style="height: 42px; padding: 3px; cursor: pointer;">
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="scheduled_start">Schedule Start Date/Time</label>
+                            <input type="datetime-local" id="notice-scheduled-start" name="scheduled_start" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="scheduled_end">Schedule End Date/Time</label>
+                            <input type="datetime-local" id="notice-scheduled-end" name="scheduled_end" class="form-control" required>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="display_duration">Auto-Dismiss Timer (Seconds)</label>
+                            <input type="number" id="notice-display-duration" name="display_duration" class="form-control" value="0" min="0">
+                            <small class="text-muted" style="font-size: 0.7rem; display: block; margin-top: 4px;">Set to 0 for persistent displays until user manually closes it.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="dismiss_cooldown">Dismiss Cooldown (Hours)</label>
+                            <input type="number" id="notice-dismiss-cooldown" name="dismiss_cooldown" class="form-control" value="24" min="1">
+                            <small class="text-muted" style="font-size: 0.7rem; display: block; margin-top: 4px;">Time before a dismissed banner is shown to visitors again.</small>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="target_type">Site Target Scope</label>
+                        <select id="notice-target-type" name="target_type" class="form-control" onchange="toggleTargetSitesInput(this.value)">
+                            <option value="all">Broadcast All Sites using plugin</option>
+                            <option value="domains">Target specific website domains</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="target-sites-wrapper" style="display: none;">
+                        <label for="target_sites">Target Website Domains (comma-separated)</label>
+                        <input type="text" id="notice-target-sites" name="target_sites" class="form-control" placeholder="example.com, mysite.org">
+                        <small class="text-muted" style="font-size: 0.7rem;">Only plugins running on these domains will display the banner.</small>
+                    </div>
+
+                    <h4 class="mb-3" style="font-size: 0.95rem; border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 1.5rem;">Alert Campaigns (Optional)</h4>
+
+                    <div class="switch-group">
+                        <div>
+                            <label style="margin-bottom: 0px; font-weight: 500;">Alert Subscriber Email List</label>
+                            <p class="text-muted" style="font-size: 0.75rem;">Send a beautiful HTML notification email when this notice starts.</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="notice-send-smtp" name="send_smtp" value="true">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="switch-group" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="margin-bottom: 0px; font-weight: 500;">Link with Uptime Kuma Status</label>
+                            <p class="text-muted" style="font-size: 0.75rem;">Sync this maintenance window to Uptime Kuma status pages/monitors.</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="notice-uptime-kuma-integration" name="uptime_kuma_integration" value="true" onchange="toggleKumaNoticeSettings(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div id="notice-kuma-settings" style="display: none;">
+                        <div class="form-group">
+                            <label for="uptime_kuma_push_url">Uptime Kuma Push Monitor URL</label>
+                            <input type="url" id="notice-uptime-kuma-push-url" name="uptime_kuma_push_url" class="form-control" placeholder="https://kuma.example.com/api/push/key">
+                        </div>
+                        <div class="form-group">
+                            <label for="uptime_kuma_monitor_ids">Target Uptime Kuma Monitor IDs (comma-separated)</label>
+                            <input type="text" id="notice-uptime-kuma-monitor-ids" name="uptime_kuma_monitor_ids" class="form-control" placeholder="1, 4, 12">
+                            <small class="text-muted" style="font-size: 0.7rem;">Specify IDs to automatically schedule maintenance windows via Direct API if configured.</small>
+                        </div>
+                    </div>
+
+                    <div class="switch-group">
+                        <label style="font-weight: 500;">Dismissible close button</label>
+                        <label class="switch">
+                            <input type="checkbox" id="notice-dismissible" name="dismissible" value="true" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Save Notice Banner</button>
+                </form>
+            </div>
+
+            <!-- Right: Browser Live Preview simulation -->
+            <div class="preview-panel">
+                <div class="card-title">Live Preview Frame</div>
+                <div class="preview-browser-frame">
+                    <div class="browser-header">
+                        <div class="browser-dot red"></div>
+                        <div class="browser-dot yellow"></div>
+                        <div class="browser-dot green"></div>
+                        <div class="browser-address">https://your-website.com</div>
+                    </div>
+                    <div class="browser-viewport">
+                        <!-- simulated notice banner -->
+                        <div id="simulated-banner-el" class="simulated-banner">
+                            ⚡ Notice Banner Live Preview
+                        </div>
+                        <div style="padding: 2rem; font-size: 0.8rem; color: #64748b; text-align: center;">
+                            <h3>Target Website Front-end</h3>
+                            <p style="margin-top: 0.5rem;">This panel demonstrates how the notice banner will render dynamically at the very top of your WordPress pages.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Banners lists -->
+        <div class="card" style="margin-top: 2rem;">
+            <div class="card-title">Scheduled Notifications</div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Notice Message</th>
+                            <th>Active Dates</th>
+                            <th>Scope Target</th>
+                            <th>Integrations</th>
+                            <th>Status</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="notices-table-body">
+                        <!-- JS generated list -->
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted);">Loading banners...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: SMTP & Subscribers -->
+    <div class="tab-pane" id="tab-smtp">
+        <div class="editor-layout">
+            <div class="card">
+                <div class="card-title">SMTP Mail Configuration</div>
+                <form id="smtp-form" onsubmit="saveSMTP(event)">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="host">SMTP Server Host</label>
+                            <input type="text" id="smtp-host" name="host" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="port">SMTP Port</label>
+                            <input type="number" id="smtp-port" name="port" class="form-control">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="username">SMTP Username</label>
+                            <input type="text" id="smtp-username" name="username" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="password">SMTP Password</label>
+                            <input type="password" id="smtp-password" name="password" class="form-control">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="from_email">Sender Email Address</label>
+                            <input type="email" id="smtp-from-email" name="from_email" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="from_name">Sender Name</label>
+                            <input type="text" id="smtp-from-name" name="from_name" class="form-control">
+                        </div>
+                    </div>
+                    <div class="switch-group">
+                        <label style="font-weight: 500;">Enable SMTP Sending</label>
+                        <label class="switch">
+                            <input type="checkbox" id="smtp-enabled" name="enabled" value="true">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="d-flex" style="gap: 1rem; margin-top: 1rem;">
+                        <button type="button" class="btn btn-secondary" onclick="testSMTPConnection()" style="flex: 1;">⚡ Test SMTP Settings</button>
+                        <button type="submit" class="btn btn-primary" style="flex: 1;">Save Configuration</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Subscribers manager -->
+            <div class="card">
+                <div class="card-title">Email Subscribers List</div>
+                <form id="subscriber-form" onsubmit="addSubscriber(event)" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+                    <input type="email" id="sub-email" name="email" class="form-control" placeholder="subscriber@domain.com" required style="flex: 2;">
+                    <input type="text" id="sub-name" name="name" class="form-control" placeholder="Name" style="flex: 1;">
+                    <button type="submit" class="btn btn-primary" style="padding: 0.75rem 1rem;">+ Add</button>
+                </form>
+                
+                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Subscriber Email</th>
+                                <th>Name</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subscribers-table-body">
+                            <!-- JS loaded -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: Uptime Kuma -->
+    <div class="tab-pane" id="tab-kuma">
+        <div class="card" style="max-width: 800px; margin: 0 auto;">
+            <div class="card-title">Uptime Kuma Status System Integration</div>
+            <p class="text-muted mb-4" style="font-size: 0.875rem;">Enable Uptime Kuma coordinates to sync maintenance windows and pause monitors automatically.</p>
+            
+            <form id="kuma-form" onsubmit="saveKumaSettings(event)">
+                <div class="form-group">
+                    <label for="url">Uptime Kuma Server URL</label>
+                    <input type="url" id="kuma-url" name="url" class="form-control" placeholder="https://uptime.mycompany.com">
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="username">Admin Username</label>
+                        <input type="text" id="kuma-username" name="username" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Admin Password</label>
+                        <input type="password" id="kuma-password" name="password" class="form-control">
+                    </div>
+                </div>
+                <div class="switch-group">
+                    <div>
+                        <label style="margin-bottom: 0px; font-weight: 500;">Enable Uptime Kuma Direct Sync</label>
+                        <p class="text-muted" style="font-size: 0.75rem;">Authenticates via Socket.IO to manage native maintenance windows.</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="kuma-enabled" name="enabled" value="true">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="d-flex" style="gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="testKumaConnection()" style="flex: 1;">⚡ Test Direct Connection</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">Save Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TAB 4: Branding & Security -->
+    <div class="tab-pane" id="tab-branding">
+        <div class="editor-layout">
+            <div class="card">
+                <div class="card-title">Branding Customization (White-Label)</div>
+                <form id="brand-form" onsubmit="saveBranding(event)">
+                    <div class="form-group">
+                        <label for="app_name">App Title Name</label>
+                        <input type="text" id="brand-app-name" name="app_name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="app_icon_url">App Logo Icon URL</label>
+                        <input type="text" id="brand-app-icon-url" name="app_icon_url" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="primary_color">Primary Theme Color</label>
+                        <input type="color" id="brand-primary-color" name="primary_color" class="form-control" style="height: 42px; padding: 3px; cursor: pointer;">
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Update Branding Assets</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Security Settings</div>
+                
+                <div class="switch-group" style="margin-bottom: 2rem;">
+                    <div>
+                        <label style="margin-bottom: 0px; font-weight: 500;">Multi-Factor Authentication (TOTP)</label>
+                        <p class="text-muted" style="font-size: 0.75rem;">Status: <strong id="mfa-status-label" style="color: var(--danger);">Disabled</strong></p>
+                    </div>
+                    <div>
+                        <button id="totp-setup-btn" class="btn btn-secondary" onclick="toggleTOTPStatus()" style="padding: 0.5rem 1rem;">Setup MFA</button>
+                    </div>
+                </div>
+
+                <div style="border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                    <h4 class="mb-2" style="font-size: 0.95rem;">WordPress Integration details</h4>
+                    <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 1rem;">Point your WordPress OmniBanner plugin to this base API URL:</p>
+                    <code id="api-endpoint-helper" style="font-family: monospace; font-size: 0.85rem; padding: 0.5rem; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 4px; display: block; word-break: break-all;">http://127.0.0.1:8000</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+// Load APIs and Data on Dashboard load
+const API_HEADERS = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    // Populate WP integration URL helper
+    const helper = document.getElementById("api-endpoint-helper");
+    if (helper) {
+        helper.textContent = window.location.origin;
+    }
+    
+    loadNotices();
+    loadSMTP();
+    loadSubscribers();
+    loadKumaSettings();
+    loadBranding();
+    loadSecurity();
+});
+
+// Toggle domain settings based on selection
+function toggleTargetSitesInput(val) {
+    const el = document.getElementById("target-sites-wrapper");
+    if (el) el.style.display = val === "domains" ? "block" : "none";
+}
+
+function toggleKumaNoticeSettings(checked) {
+    const el = document.getElementById("notice-kuma-settings");
+    if (el) el.style.display = checked ? "block" : "none";
+}
+
+// Notice forms reset
+function resetNoticeForm() {
+    document.getElementById("editor-action-title").textContent = "Create Scheduled Notice";
+    document.getElementById("notice-id").value = "";
+    document.getElementById("notice-form").reset();
+    document.getElementById("notice-bg-color").value = "#ef4444";
+    document.getElementById("notice-text-color").value = "#ffffff";
+    toggleTargetSitesInput("all");
+    toggleKumaNoticeSettings(false);
+    syncBannerPreview();
+}
+
+// Load Scheduled Notices
+async function loadNotices() {
+    try {
+        const response = await fetch("/api/notices", { headers: API_HEADERS });
+        const notices = await response.json();
+        
+        const tbody = document.getElementById("notices-table-body");
+        tbody.innerHTML = "";
+        
+        if (notices.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No scheduled notice banners.</td></tr>`;
+            return;
+        }
+        
+        notices.forEach(n => {
+            const tr = document.createElement("tr");
+            
+            // Format dates
+            const start = new Date(n.scheduled_start).toLocaleString();
+            const end = new Date(n.scheduled_end).toLocaleString();
+            
+            // Format Target Scope
+            let scope = n.target_type === "all" ? "Broadcast All" : `Target: ${n.target_sites}`;
+            
+            // Format Integrations
+            let intList = [];
+            if (n.send_smtp) intList.push("📧 SMTP");
+            if (n.uptime_kuma_integration) intList.push("🟢 Kuma");
+            let integrations = intList.join(", ") || "None";
+            
+            // Format Status
+            const now = new Date();
+            const sTime = new Date(n.scheduled_start);
+            const eTime = new Date(n.scheduled_end);
+            
+            let statusBadge = "";
+            if (now < sTime) {
+                statusBadge = `<span style="background-color: var(--warning); color: black; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">Scheduled</span>`;
+            } else if (now > eTime) {
+                statusBadge = `<span style="background-color: var(--border-color); color: var(--text-muted); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">Expired</span>`;
+            } else {
+                statusBadge = `<span style="background-color: var(--success); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">Active</span>`;
+            }
+            
+            tr.innerHTML = `
+                <td style="max-width: 300px; word-wrap: break-word;">${n.text}</td>
+                <td><small>S: ${start}<br>E: ${end}</small></td>
+                <td>${scope}</td>
+                <td>${integrations}</td>
+                <td>${statusBadge}</td>
+                <td class="text-right">
+                    <button class="btn btn-secondary" onclick="editNotice(${JSON.stringify(n).replace(/"/g, '&quot;')})" style="padding: 0.35rem 0.65rem; font-size: 0.75rem; margin-right: 0.25rem;">Edit</button>
+                    <button class="btn btn-danger" onclick="deleteNotice(${n.id})" style="padding: 0.35rem 0.65rem; font-size: 0.75rem;">Delete</button>
+                </td>
+            `;
+            
+            tbody.appendChild(tr);
+        });
+    } catch(e) {
+        showToast("Error loading notices", "error");
+    }
+}
+
+// Save notice banner
+async function saveNotice(event) {
+    event.preventDefault();
+    const form = document.getElementById("notice-form");
+    const formData = new FormData(form);
+    
+    const obj = {};
+    formData.forEach((value, key) => {
+        if (key === "dismissible" || key === "send_smtp" || key === "uptime_kuma_integration") {
+            obj[key] = value === "true";
+        } else if (key === "id" || key === "display_duration" || key === "dismiss_cooldown") {
+            if (value !== "") obj[key] = parseInt(value);
+        } else {
+            obj[key] = value;
+        }
+    });
+    
+    // Explicitly override switch indicators if untoggled
+    if (!obj.hasOwnProperty("dismissible")) obj["dismissible"] = false;
+    if (!obj.hasOwnProperty("send_smtp")) obj["send_smtp"] = false;
+    if (!obj.hasOwnProperty("uptime_kuma_integration")) obj["uptime_kuma_integration"] = false;
+    
+    const method = obj.id ? "PUT" : "POST";
+    const endpoint = obj.id ? `/api/notices/${obj.id}` : "/api/notices";
+    
+    showToast("Saving notice banner...", "info");
+    
+    try {
+        const response = await fetch(endpoint, {
+            method: method,
+            headers: API_HEADERS,
+            body: JSON.stringify(obj)
+        });
+        
+        if (response.ok) {
+            showToast("Notice banner saved successfully!", "success");
+            resetNoticeForm();
+            loadNotices();
+        } else {
+            const data = await response.json();
+            showToast(`Failed to save: ${data.detail || "Error"}`, "error");
+        }
+    } catch(e) {
+        showToast("Error sending notice form", "error");
+    }
+}
+
+// Edit notice click
+function editNotice(notice) {
+    document.getElementById("editor-action-title").textContent = "Edit Notice Banner";
+    document.getElementById("notice-id").value = notice.id;
+    document.getElementById("notice-text").value = notice.text;
+    document.getElementById("notice-bg-color").value = notice.bg_color;
+    document.getElementById("notice-text-color").value = notice.text_color;
+    document.getElementById("notice-display-duration").value = notice.display_duration;
+    document.getElementById("notice-dismiss-cooldown").value = notice.dismiss_cooldown;
+    document.getElementById("notice-target-type").value = notice.target_type;
+    document.getElementById("notice-target-sites").value = notice.target_sites || "";
+    document.getElementById("notice-dismissible").checked = notice.dismissible;
+    document.getElementById("notice-send-smtp").checked = notice.send_smtp;
+    document.getElementById("notice-uptime-kuma-integration").checked = notice.uptime_kuma_integration;
+    
+    // Formats dates back to datetime-local values
+    // ISO format has T, strip offset if necessary
+    const sDate = new Date(notice.scheduled_start);
+    const eDate = new Date(notice.scheduled_end);
+    
+    document.getElementById("notice-scheduled-start").value = new Date(sDate.getTime() - sDate.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    document.getElementById("notice-scheduled-end").value = new Date(eDate.getTime() - eDate.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    
+    toggleTargetSitesInput(notice.target_type);
+    toggleKumaNoticeSettings(notice.uptime_kuma_integration);
+    
+    document.getElementById("notice-uptime-kuma-push-url").value = notice.uptime_kuma_push_url || "";
+    document.getElementById("notice-uptime-kuma-monitor-ids").value = notice.uptime_kuma_monitor_ids || "";
+    
+    syncBannerPreview();
+}
+
+// Delete notice click
+async function deleteNotice(id) {
+    if (!confirm("Are you sure you want to permanently delete this notice banner?")) return;
+    
+    try {
+        const response = await fetch(`/api/notices/${id}`, {
+            method: "DELETE",
+            headers: API_HEADERS
+        });
+        if (response.ok) {
+            showToast("Notice banner deleted", "success");
+            loadNotices();
+        }
+    } catch(e) {
+        showToast("Error deleting notice", "error");
+    }
+}
+
+// SMTP loading
+async function loadSMTP() {
+    try {
+        const response = await fetch("/api/smtp", { headers: API_HEADERS });
+        const smtp = await response.json();
+        
+        document.getElementById("smtp-host").value = smtp.host || "";
+        document.getElementById("smtp-port").value = smtp.port || 587;
+        document.getElementById("smtp-username").value = smtp.username || "";
+        document.getElementById("smtp-password").value = smtp.password || "";
+        document.getElementById("smtp-from-email").value = smtp.from_email || "";
+        document.getElementById("smtp-from-name").value = smtp.from_name || "OmniBanner Alerts";
+        document.getElementById("smtp-enabled").checked = smtp.enabled;
+    } catch(e) {
+        // Silent error
+    }
+}
+
+// Save SMTP Config
+async function saveSMTP(event) {
+    event.preventDefault();
+    const form = document.getElementById("smtp-form");
+    const formData = new FormData(form);
+    
+    const obj = {};
+    formData.forEach((value, key) => {
+        if (key === "port") obj[key] = parseInt(value);
+        else if (key === "enabled") obj[key] = value === "true";
+        else obj[key] = value;
+    });
+    
+    if (!obj.hasOwnProperty("enabled")) obj["enabled"] = false;
+    
+    showToast("Saving SMTP config...", "info");
+    try {
+        const response = await fetch("/api/smtp", {
+            method: "POST",
+            headers: API_HEADERS,
+            body: JSON.stringify(obj)
+        });
+        if (response.ok) {
+            showToast("SMTP settings saved!", "success");
+        } else {
+            showToast("Failed to save SMTP settings", "error");
+        }
+    } catch(e) {
+        showToast("Error sending SMTP config", "error");
+    }
+}
+
+// Load Subscribers
+async function loadSubscribers() {
+    try {
+        const response = await fetch("/api/subscribers", { headers: API_HEADERS });
+        const subs = await response.json();
+        
+        const tbody = document.getElementById("subscribers-table-body");
+        tbody.innerHTML = "";
+        
+        if (subs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted);">No subscribers yet.</td></tr>`;
+            return;
+        }
+        
+        subs.forEach(s => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                <td>${s.email}</td>
+                <td>${s.name || "-"}</td>
+                <td class="text-right">
+                    <button class="btn btn-danger" onclick="deleteSubscriber(${s.id})" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Remove</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch(e) {
+        // Silent error
+    }
+}
+
+// Add subscriber
+async function addSubscriber(event) {
+    event.preventDefault();
+    const email = document.getElementById("sub-email").value;
+    const name = document.getElementById("sub-name").value;
+    
+    try {
+        const response = await fetch("/api/subscribers", {
+            method: "POST",
+            headers: API_HEADERS,
+            body: JSON.stringify({ email, name })
+        });
+        if (response.ok) {
+            showToast("Subscriber added!", "success");
+            document.getElementById("sub-email").value = "";
+            document.getElementById("sub-name").value = "";
+            loadSubscribers();
+        } else {
+            const data = await response.json();
+            showToast(data.detail || "Error adding subscriber", "error");
+        }
+    } catch(e) {
+        showToast("Error adding subscriber", "error");
+    }
+}
+
+// Delete subscriber
+async function deleteSubscriber(id) {
+    if (!confirm("Remove subscriber?")) return;
+    try {
+        const response = await fetch(`/api/subscribers/${id}`, { method: "DELETE", headers: API_HEADERS });
+        if (response.ok) {
+            showToast("Subscriber removed", "success");
+            loadSubscribers();
+        }
+    } catch(e) {
+        showToast("Error removing subscriber", "error");
+    }
+}
+
+// Load Kuma Settings
+async function loadKumaSettings() {
+    try {
+        const response = await fetch("/api/kuma", { headers: API_HEADERS });
+        const kuma = await response.json();
+        
+        document.getElementById("kuma-url").value = kuma.url || "";
+        document.getElementById("kuma-username").value = kuma.username || "";
+        document.getElementById("kuma-password").value = kuma.password || "";
+        document.getElementById("kuma-enabled").checked = kuma.enabled;
+    } catch(e) {
+        // Silent
+    }
+}
+
+// Save Kuma Settings
+async function saveKumaSettings(event) {
+    event.preventDefault();
+    const form = document.getElementById("kuma-form");
+    const formData = new FormData(form);
+    
+    const obj = {};
+    formData.forEach((value, key) => {
+        if (key === "enabled") obj[key] = value === "true";
+        else obj[key] = value;
+    });
+    
+    if (!obj.hasOwnProperty("enabled")) obj["enabled"] = false;
+    
+    showToast("Saving Uptime Kuma credentials...", "info");
+    try {
+        const response = await fetch("/api/kuma", {
+            method: "POST",
+            headers: API_HEADERS,
+            body: JSON.stringify(obj)
+        });
+        if (response.ok) {
+            showToast("Uptime Kuma settings saved successfully!", "success");
+        } else {
+            showToast("Failed to save Kuma credentials", "error");
+        }
+    } catch(e) {
+        showToast("Error sending Kuma form", "error");
+    }
+}
+
+// Load Branding Settings
+async function loadBranding() {
+    try {
+        const response = await fetch("/api/brand", { headers: API_HEADERS });
+        const brand = await response.json();
+        
+        document.getElementById("brand-app-name").value = brand.app_name || "OmniBanner";
+        document.getElementById("brand-app-icon-url").value = brand.app_icon_url || "/static/brand/logo.png";
+        document.getElementById("brand-primary-color").value = brand.primary_color || "#8b5cf6";
+    } catch(e) {
+        // Silent
+    }
+}
+
+// Save Branding Customizations
+async function saveBranding(event) {
+    event.preventDefault();
+    const form = document.getElementById("brand-form");
+    const formData = new FormData(form);
+    
+    const obj = {};
+    formData.forEach((value, key) => {
+        obj[key] = value;
+    });
+    
+    showToast("Updating brand configs...", "info");
+    try {
+        const response = await fetch("/api/brand", {
+            method: "POST",
+            headers: API_HEADERS,
+            body: JSON.stringify(obj)
+        });
+        if (response.ok) {
+            showToast("Branding settings saved! Reloading configuration...", "success");
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast("Failed to update branding", "error");
+        }
+    } catch(e) {
+        showToast("Error sending brand parameters", "error");
+    }
+}
+
+// Load security MFA status
+async function loadSecurity() {
+    try {
+        const response = await fetch("/api/security/status", { headers: API_HEADERS });
+        const status = await response.json();
+        
+        const label = document.getElementById("mfa-status-label");
+        const btn = document.getElementById("totp-setup-btn");
+        
+        if (status.totp_enabled) {
+            label.textContent = "Enabled";
+            label.style.color = "var(--success)";
+            btn.textContent = "Disable MFA";
+            btn.className = "btn btn-danger";
+        } else {
+            label.textContent = "Disabled";
+            label.style.color = "var(--danger)";
+            btn.textContent = "Setup MFA";
+            btn.className = "btn btn-secondary";
+        }
+    } catch(e) {
+        // Silent
+    }
+}
+
+// TOTP toggle switch
+async function toggleTOTPStatus() {
+    const label = document.getElementById("mfa-status-label");
+    const isEnabled = label.textContent.trim() === "Enabled";
+    
+    if (isEnabled) {
+        if (!confirm("Are you sure you want to disable multi-factor authentication?")) return;
+        showToast("Disabling MFA...", "info");
+        try {
+            const response = await fetch("/api/totp/disable", { method: "POST", headers: API_HEADERS });
+            if (response.ok) {
+                showToast("Multi-factor authentication disabled.", "success");
+                loadSecurity();
+            }
+        } catch(e) {
+            showToast("Error disabling MFA", "error");
+        }
+    } else {
+        // Go to TOTP setup screen to scan QR
+        window.location.href = "/totp-setup";
+    }
+}
+</script>
+{% endblock %}
+{% endblock %}

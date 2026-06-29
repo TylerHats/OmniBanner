@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Initial Setup - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container">
+    <div class="setup-header">
+        <h2>Welcome to {{ app_name }}</h2>
+        <p class="text-muted" style="margin-top: 5px;">Let's customize and configure your notification control center.</p>
+    </div>
+
+    <!-- Step indicators -->
+    <div class="setup-steps">
+        <div class="step-node active" data-step="1">1</div>
+        <div class="step-node" data-step="2">2</div>
+        <div class="step-node" data-step="3">3</div>
+        <div class="step-node" data-step="4">4</div>
+    </div>
+
+    <form id="setup-form" action="/setup" method="POST">
+        <!-- STEP 1: Branding and white-labeling -->
+        <div class="setup-step-content active" id="step-1">
+            <h3 class="mb-4">Step 1: Brand Customization</h3>
+            
+            <div class="form-group">
+                <label for="app_name">Application Name</label>
+                <input type="text" id="setup-app-name" name="app_name" class="form-control" value="OmniBanner" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="primary_color">Brand Primary Color</label>
+                <input type="color" id="setup-primary-color" name="primary_color" class="form-control" value="#8b5cf6" style="height: 45px; padding: 5px; cursor: pointer;">
+            </div>
+
+            <div class="form-group">
+                <label for="app_icon_url">App Logo URL (or path)</label>
+                <input type="text" id="setup-app-icon-url" name="app_icon_url" class="form-control" value="/static/brand/logo.png" required>
+                <small class="text-muted" style="font-size: 0.75rem; display: block; margin-top: 4px;">Provide an absolute URL or path to custom branding icons.</small>
+            </div>
+
+            <div class="text-right" style="margin-top: 2rem;">
+                <button type="button" class="btn btn-primary" onclick="nextStep()">Continue &rarr;</button>
+            </div>
+        </div>
+
+        <!-- STEP 2: Authentication Configuration -->
+        <div class="setup-step-content" id="step-2">
+            <h3 class="mb-4">Step 2: Authentication & Security</h3>
+            
+            <div class="form-group">
+                <label for="auth_mode">Administrative Auth Mode</label>
+                <select id="setup-auth-mode" name="auth_mode" class="form-control">
+                    <option value="credentials">Local Credentials (Username/Password)</option>
+                    <option value="oidc">OpenID Connect (Single Sign-On)</option>
+                </select>
+            </div>
+
+            <!-- Local auth inputs -->
+            <div id="auth-local-section" style="margin-top: 1.5rem;">
+                <div class="form-group">
+                    <label for="admin_username">Admin Username</label>
+                    <input type="text" id="admin-username" name="admin_username" class="form-control" value="admin">
+                </div>
+                <div class="form-group">
+                    <label for="admin_password">Admin Password</label>
+                    <input type="password" id="admin-password" name="admin_password" class="form-control" placeholder="••••••••">
+                </div>
+                <div class="switch-group">
+                    <div>
+                        <label style="margin-bottom: 0px; font-weight: 600; color: var(--text-main);">Require TOTP Multi-Factor Auth</label>
+                        <p class="text-muted" style="font-size: 0.75rem;">Enforce Google Authenticator verification upon login.</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="enable-totp-setup" name="enable_totp" value="true">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- OIDC auth inputs -->
+            <div id="auth-oidc-section" style="display: none; margin-top: 1.5rem;">
+                <div class="form-group">
+                    <label for="oidc_provider_name">OIDC Provider Name</label>
+                    <input type="text" id="oidc-provider-name" name="oidc_provider_name" class="form-control" value="Authentik">
+                </div>
+                <div class="form-group">
+                    <label for="oidc_issuer_url">Issuer URL (Base Authority)</label>
+                    <input type="url" id="oidc-issuer-url" name="oidc_issuer_url" class="form-control" placeholder="https://authentik.company.com/application/o/omnibanner/">
+                    <small class="text-muted" style="font-size: 0.75rem;">Will fetch auto config parameters from <code>.well-known/openid-configuration</code> automatically.</small>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="oidc_client_id">Client ID</label>
+                        <input type="text" id="oidc-client-id" name="oidc_client_id" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label for="oidc_client_secret">Client Secret</label>
+                        <input type="password" id="oidc-client-secret" name="oidc_client_secret" class="form-control">
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex" style="justify-content: space-between; margin-top: 2rem;">
+                <button type="button" class="btn btn-secondary" onclick="prevStep()">&larr; Back</button>
+                <button type="button" class="btn btn-primary" onclick="nextStep()">Continue &rarr;</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: SMTP Settings -->
+        <div class="setup-step-content" id="step-3">
+            <h3 class="mb-1">Step 3: SMTP Notification Settings (Optional)</h3>
+            <p class="text-muted mb-4" style="font-size: 0.85rem;">Required to send email alerts to subscribers when notifications go active.</p>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="smtp_host">SMTP Server Host</label>
+                    <input type="text" id="smtp-host" name="smtp_host" class="form-control" placeholder="smtp.mailgun.org">
+                </div>
+                <div class="form-group">
+                    <label for="smtp_port">SMTP Port</label>
+                    <input type="number" id="smtp-port" name="smtp_port" class="form-control" value="587">
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="smtp_username">SMTP Username</label>
+                    <input type="text" id="smtp-username" name="smtp_username" class="form-control" placeholder="postmaster@yourdomain.com">
+                </div>
+                <div class="form-group">
+                    <label for="smtp_password">SMTP Password</label>
+                    <input type="password" id="smtp-password" name="smtp_password" class="form-control" placeholder="••••••••">
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="smtp_from_email">Sender Email Address</label>
+                    <input type="email" id="smtp-from-email" name="smtp_from_email" class="form-control" placeholder="noreply@yourdomain.com">
+                </div>
+                <div class="form-group">
+                    <label for="smtp_from_name">Sender Name</label>
+                    <input type="text" id="smtp-from-name" name="smtp_from_name" class="form-control" value="OmniBanner Alerts">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 2rem;">
+                <button type="button" class="btn btn-secondary" onclick="testSMTPConnection()" style="width: 100%;">⚡ Test SMTP Settings</button>
+            </div>
+
+            <div class="d-flex" style="justify-content: space-between; margin-top: 2rem;">
+                <button type="button" class="btn btn-secondary" onclick="prevStep()">&larr; Back</button>
+                <button type="button" class="btn btn-primary" onclick="nextStep()">Continue &rarr;</button>
+            </div>
+        </div>
+
+        <!-- STEP 4: Uptime Kuma connection -->
+        <div class="setup-step-content" id="step-4">
+            <h3 class="mb-1">Step 4: Uptime Kuma Settings (Optional)</h3>
+            <p class="text-muted mb-4" style="font-size: 0.85rem;">Automatically coordinates maintenance schedules with active notifications.</p>
+
+            <div class="form-group">
+                <label for="kuma_url">Uptime Kuma Console URL</label>
+                <input type="url" id="kuma-url" name="kuma_url" class="form-control" placeholder="https://uptime.mydomain.com">
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="kuma_username">Uptime Kuma Username</label>
+                    <input type="text" id="kuma-username" name="kuma_username" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="kuma_password">Uptime Kuma Password</label>
+                    <input type="password" id="kuma-password" name="kuma_password" class="form-control" placeholder="••••••••">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 2rem;">
+                <button type="button" class="btn btn-secondary" onclick="testKumaConnection()" style="width: 100%;">⚡ Test Kuma Connection</button>
+            </div>
+
+            <div class="d-flex" style="justify-content: space-between; margin-top: 2rem;">
+                <button type="button" class="btn btn-secondary" onclick="prevStep()">&larr; Back</button>
+                <button type="button" class="btn btn-primary" onclick="submitSetupForm()">Finish Setup &rarr;</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+async function submitSetupForm() {
+    const form = document.getElementById("setup-form");
+    const formData = new FormData(form);
+    
+    // Convert Form Data to JSON
+    const object = {};
+    formData.forEach((value, key) => {
+        if (key === "enable_totp") {
+            object[key] = value === "true";
+        } else {
+            object[key] = value;
+        }
+    });
+    
+    if (object["auth_mode"] === "credentials") {
+        if (!object["admin_username"] || !object["admin_password"]) {
+            showToast("Admin username and password are required.", "error");
+            return;
+        }
+    } else if (object["auth_mode"] === "oidc") {
+        if (!object["oidc_issuer_url"] || !object["oidc_client_id"]) {
+            showToast("OIDC Issuer URL and Client ID are required.", "error");
+            return;
+        }
+    }
+    
+    showToast("Completing setup...", "info");
+    
+    try {
+        const response = await fetch("/api/setup", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(object)
+        });
+        
+        if (response.ok) {
+            showToast("Setup completed successfully! Redirecting...", "success");
+            setTimeout(() => {
+                window.location.href = "/login";
+            }, 1500);
+        } else {
+            const data = await response.json();
+            showToast(`Setup failed: ${data.detail || "Unknown error"}`, "error");
+        }
+    } catch(e) {
+        showToast("Error sending setup configuration", "error");
+    }
+}
+</script>
+{% endblock %}

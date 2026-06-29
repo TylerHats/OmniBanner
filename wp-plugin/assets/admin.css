@@ -1,0 +1,75 @@
+.omnibanner-admin-wrap {
+    max-width: 900px;
+    margin: 20px auto 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+}
+
+.omnibanner-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 25px;
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 15px;
+}
+
+.omnibanner-brand-icon {
+    height: 48px;
+    width: auto;
+    object-contain: fit;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+.omnibanner-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+    color: #23282d;
+}
+
+.omnibanner-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 8px;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 20px;
+}
+
+.omnibanner-card h2.title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+    color: var(--brand-color);
+}
+
+#omnibanner-sync-btn {
+    margin-left: 10px;
+    vertical-align: middle;
+    background-color: #f6f7f7;
+    border-color: var(--brand-color);
+    color: var(--brand-color);
+    transition: all 0.2s;
+}
+
+#omnibanner-sync-btn:hover {
+    background-color: var(--brand-color);
+    color: #fff;
+    border-color: var(--brand-color);
+}
+
+/* Customize submit button colors */
+.omnibanner-admin-wrap .button-primary {
+    background-color: var(--brand-color) !important;
+    border-color: var(--brand-color) !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+    font-weight: 600;
+    transition: filter 0.2s;
+}
+
+.omnibanner-admin-wrap .button-primary:hover {
+    filter: brightness(0.9);
+}

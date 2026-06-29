@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Enable MFA - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container" style="max-width: 500px; margin-top: 4rem;">
+    <div class="setup-header" style="margin-bottom: 2rem;">
+        <h2>Enable Multi-Factor Authentication</h2>
+        <p class="text-muted" style="margin-top: 5px;">Secure your notification settings dashboard using TOTP.</p>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <p class="text-muted mb-4" style="font-size: 0.9rem;">Scan the QR code below using your favorite authenticator app (e.g. Google Authenticator, Bitwarden, Authy, Authentik, etc.) to set up MFA.</p>
+        
+        <div id="qr-container">
+            <canvas id="qr-canvas"></canvas>
+        </div>
+        
+        <p style="font-size: 0.9rem; margin-top: 1rem;">Or enter this code manually:</p>
+        <code style="font-size: 1.15rem; font-weight: 700; color: var(--primary); background: rgba(139, 92, 246, 0.1); padding: 0.4rem 1rem; border-radius: 6px; letter-spacing: 1px; display: inline-block; margin-top: 0.5rem;">{{ totp_secret }}</code>
+    </div>
+
+    <form onsubmit="verifyAndEnableMFA(event)">
+        <div class="form-group">
+            <label for="code">MFA Verification Code</label>
+            <input type="text" id="verification-code" name="code" class="form-control" placeholder="000000" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required>
+            <small class="text-muted" style="font-size: 0.75rem; display: block; margin-top: 4px;">Enter the 6-digit code displayed in your authenticator app.</small>
+        </div>
+        
+        <div class="d-flex" style="justify-content: space-between; margin-top: 2rem;">
+            <a href="/dashboard" class="btn btn-secondary" style="text-decoration: none;">Skip / Cancel</a>
+            <button type="submit" class="btn btn-primary">Enable MFA</button>
+        </div>
+    </form>
+</div>
+
+{% block extra_js %}
+<script src="/static/js/qrious.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    // Generate QR code client-side using QRious
+    const qrUri = "{{ totp_uri }}";
+    if (qrUri) {
+        new QRious({
+            element: document.getElementById("qr-canvas"),
+            value: qrUri,
+            size: 200,
+            level: 'H'
+        });
+    }
+});
+
+async function verifyAndEnableMFA(event) {
+    event.preventDefault();
+    const codeEl = document.getElementById("verification-code");
+    if (!codeEl) return;
+    const code = codeEl.value;
+    
+    showToast("Verifying MFA code...", "info");
+    
+    try {
+        const response = await fetch("/api/totp/verify", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
+            },
+            body: JSON.stringify({ secret: "{{ totp_secret }}", code: code })
+        });
+        
+        if (response.ok) {
+            showToast("MFA enabled successfully!", "success");
+            setTimeout(() => {
+                window.location.href = "/dashboard";
+            }, 1000);
+        } else {
+            const data = await response.json();
+            showToast(data.detail || "Invalid code verification failed.", "error");
+        }
+    } catch(e) {
+        showToast("Error sending MFA verification code", "error");
+    }
+}
+</script>
+{% endblock %}
+{% endblock %}

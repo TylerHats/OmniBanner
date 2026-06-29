@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="icon" href="{{ app_icon_url }}" type="image/png">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    {% block extra_css %}{% endblock %}
+    <style>
+        :root {
+            --primary: {{ primary_color or '#8b5cf6' }};
+            --primary-hover: {{ primary_hover or '#7c3aed' }};
+            --primary-glow: rgba(139, 92, 246, 0.15);
+        }
+    </style>
+</head>
+<body data-theme="dark">
+    <!-- Toast notifications container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <header>
+        <div class="logo-container">
+            <img src="{{ app_icon_url }}" alt="Logo" class="logo-img">
+            <span class="logo-text">{{ app_name }}</span>
+        </div>
+        {% if show_nav %}
+        <nav class="nav-user">
+            <span>Logged in as <strong>{{ user_display }}</strong></span>
+            <a href="/logout" class="logout-btn">Logout</a>
+        </nav>
+        {% endif %}
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/js/dashboard.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
