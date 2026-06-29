@@ -3,8 +3,8 @@
  * Plugin Name: OmniBanner Notice Integration
  * Description: Connects to a central OmniBanner service to dynamically display scheduled white-labeled alert banners.
  * Version: 1.0.0
- * Author: Antigravity
- * License: GPL2
+ * Author: Tyler Hatfield
+ * License: GPL3+
  * Text Domain: omnibanner
  */
 
