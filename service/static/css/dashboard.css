@@ -81,7 +81,7 @@ header {
 .logo-img {
     height: 2.25rem;
     width: auto;
-    object-contain: fit;
+    object-fit: contain;
     border-radius: 6px;
 }
 
@@ -524,7 +524,8 @@ tr:hover td {
     right: 1.5rem;
     z-index: 100;
     display: flex;
-    flex-col: gap-0.5rem;
+    flex-direction: column;
+    gap: 0.5rem;
 }
 
 .toast {
