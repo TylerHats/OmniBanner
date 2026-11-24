@@ -9,6 +9,12 @@ ENV/
 env/
 *.db
 *.sqlite
+*.secret_key
+
+# Runtime data & uploads
+service/data/
+service/static/uploads/
+.env
 
 # OS files
 .DS_Store

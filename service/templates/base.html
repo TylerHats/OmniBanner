@@ -4,19 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ app_name }}{% endblock %}</title>
-    <link rel="icon" href="{{ app_icon_url }}" type="image/png">
+    <link rel="icon" href="{{ favicon_url or app_icon_url }}" type="image/png">
     <link rel="stylesheet" href="/static/css/dashboard.css">
     {% block extra_css %}{% endblock %}
     <style>
         :root {
             --primary: {{ primary_color or '#8b5cf6' }};
-            --primary-hover: {{ primary_hover or '#7c3aed' }};
-            --primary-glow: rgba(139, 92, 246, 0.15);
+            --secondary: {{ secondary_color or '#6366f1' }};
+            --primary-hover: color-mix(in srgb, var(--primary) 85%, black);
+            --primary-glow: color-mix(in srgb, var(--primary) 18%, transparent);
         }
+        {% if custom_css %}{{ custom_css | safe }}{% endif %}
     </style>
+    <script>
+        (function () {
+            var pref = "{{ active_theme or 'dark' }}";
+            if (pref === "system") {
+                pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+            }
+            document.documentElement.setAttribute("data-theme", pref);
+        })();
+    </script>
 </head>
-<body data-theme="dark">
-    <!-- Toast notifications container -->
+<body>
     <div id="toast-container" class="toast-container"></div>
 
     <header>
@@ -24,17 +34,30 @@
             <img src="{{ app_icon_url }}" alt="Logo" class="logo-img">
             <span class="logo-text">{{ app_name }}</span>
         </div>
-        {% if show_nav %}
-        <nav class="nav-user">
-            <span>Logged in as <strong>{{ user_display }}</strong></span>
-            <a href="/logout" class="logout-btn">Logout</a>
-        </nav>
-        {% endif %}
+        <div class="header-actions">
+            {% if show_nav %}
+            {% if public_status_page %}
+            <a href="/status" target="_blank" rel="noopener" class="logout-btn" style="text-decoration: none;">📡 Status</a>
+            {% endif %}
+            <button type="button" id="theme-toggle-btn" class="btn btn-secondary btn-sm" onclick="toggleThemeMode()" title="Toggle Light/Dark Theme">🌓 Theme</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="typeof openAccountModal === 'function' ? openAccountModal() : (window.location.href='/dashboard')" title="Account &amp; Security">👤 Account</button>
+            <nav class="nav-user">
+                <span>Logged in as <strong>{{ user_display }}</strong>
+                    {% if user_role %}<span class="role-badge role-{{ user_role }}">{{ user_role }}</span>{% endif %}
+                </span>
+                <button type="button" class="logout-btn" onclick="performLogout()">Logout</button>
+            </nav>
+            {% endif %}
+        </div>
     </header>
 
     <main>
         {% block content %}{% endblock %}
     </main>
+
+    {% if footer_text %}
+    <footer class="app-footer">{{ footer_text }}</footer>
+    {% endif %}
 
     <script src="/static/js/dashboard.js"></script>
     {% block extra_js %}{% endblock %}

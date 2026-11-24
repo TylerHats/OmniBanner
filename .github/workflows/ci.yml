@@ -1,0 +1,55 @@
+name: OmniBanner CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-and-plugin-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r service/requirements.txt
+
+      - name: Compile and run backend unit tests
+        run: |
+          python3 -m py_compile service/*.py
+          python3 -m unittest discover -s service/tests -v
+
+      - name: Set up PHP 8.3 and Node 20
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+
+      - name: Lint WordPress plugin PHP & JS
+        run: |
+          php -l wp-plugin/omnibanner.php
+          php -l wp-plugin/uninstall.php
+          ! grep -rn "sslverify.*false" wp-plugin/
+          ! grep -rn --include="*.php" --include="*.js" "innerHTML" wp-plugin/
+          node --check service/static/js/dashboard.js
+          node --check service/static/js/dashboard_app.js
+          node --check service/static/js/embed.js
+          node --check wp-plugin/assets/admin.js
+          node --check wp-plugin/assets/banner.js
+
+      - name: Package WordPress plugin ZIP artifact
+        run: |
+          mkdir -p dist/omnibanner
+          cp -r wp-plugin/* dist/omnibanner/
+          (cd dist && zip -r ../omnibanner-release.zip omnibanner)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnibanner-wp-plugin
+          path: omnibanner-release.zip
+

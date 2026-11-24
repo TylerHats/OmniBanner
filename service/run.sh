@@ -1,13 +1,9 @@
 #!/bin/bash
-# Local startup script for OmniBanner central service
+set -e
 
-# Verify virtual environment
-if [ ! -d ".venv" ]; then
-    echo "Virtual environment (.venv) not found. Setting up..."
-    if python3 -m venv .venv 2>/dev/null; then
-        echo "Created virtual environment."
-    else
-        echo "Python ensurepip missing. Bootstrapping virtual environment..."
+if [ ! -d ".venv" ] || [ ! -x ".venv/bin/uvicorn" ]; then
+    echo "Initializing virtual environment (.venv)..."
+    if ! python3 -m venv .venv 2>/dev/null; then
         python3 -m venv --without-pip .venv
         curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py
         .venv/bin/python3 get-pip.py
@@ -16,5 +12,10 @@ if [ ! -d ".venv" ]; then
     .venv/bin/pip install -r requirements.txt
 fi
 
-echo "Starting OmniBanner backend server..."
-.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+RELOAD_FLAG=""
+if [ "${OMNIBANNER_RELOAD:-0}" = "1" ]; then
+    RELOAD_FLAG="--reload"
+fi
+
+echo "Starting OmniBanner backend server on port ${PORT:-8000}..."
+exec .venv/bin/uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers --forwarded-allow-ips="*" $RELOAD_FLAG

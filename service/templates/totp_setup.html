@@ -3,84 +3,99 @@
 {% block title %}Enable MFA - {{ app_name }}{% endblock %}
 
 {% block content %}
-<div class="setup-container" style="max-width: 500px; margin-top: 4rem;">
-    <div class="setup-header" style="margin-bottom: 2rem;">
+<div class="setup-container" style="max-width: 520px; margin-top: 3.5rem;">
+    <div class="setup-header" style="margin-bottom: 1.5rem;">
         <h2>Enable Multi-Factor Authentication</h2>
-        <p class="text-muted" style="margin-top: 5px;">Secure your notification settings dashboard using TOTP.</p>
+        <p class="text-muted">Protect your {{ app_name }} account with TOTP and recovery backup codes.</p>
     </div>
 
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <p class="text-muted mb-4" style="font-size: 0.9rem;">Scan the QR code below using your favorite authenticator app (e.g. Google Authenticator, Bitwarden, Authy, Authentik, etc.) to set up MFA.</p>
-        
-        <div id="qr-container">
-            <canvas id="qr-canvas"></canvas>
+    <div id="totp-enroll-pane">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+            <p class="text-muted mb-3" style="font-size: 0.88rem;">Scan this QR code in Google Authenticator, Bitwarden, 1Password, or Authentik:</p>
+            <div id="qr-container">
+                <canvas id="qr-canvas"></canvas>
+            </div>
+            <p style="font-size: 0.85rem; margin-top: 0.5rem;">Or enter secret manually:</p>
+            <code class="code-box" style="display: inline-block; margin-top: 0.35rem; font-size: 1rem; color: var(--primary);">{{ totp_secret }}</code>
         </div>
-        
-        <p style="font-size: 0.9rem; margin-top: 1rem;">Or enter this code manually:</p>
-        <code style="font-size: 1.15rem; font-weight: 700; color: var(--primary); background: rgba(139, 92, 246, 0.1); padding: 0.4rem 1rem; border-radius: 6px; letter-spacing: 1px; display: inline-block; margin-top: 0.5rem;">{{ totp_secret }}</code>
+
+        <form onsubmit="verifyAndEnableMFA(event)">
+            <div class="form-group">
+                <label for="verification-code">6-Digit Verification Code</label>
+                <input type="text" id="verification-code" name="code" class="form-control" placeholder="000000" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required>
+            </div>
+            <div class="d-flex" style="justify-content: space-between; margin-top: 1.5rem;">
+                <a href="/dashboard" class="btn btn-secondary">Skip / Cancel</a>
+                <button type="submit" class="btn btn-primary">Verify & Enable MFA</button>
+            </div>
+        </form>
     </div>
 
-    <form onsubmit="verifyAndEnableMFA(event)">
-        <div class="form-group">
-            <label for="code">MFA Verification Code</label>
-            <input type="text" id="verification-code" name="code" class="form-control" placeholder="000000" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required>
-            <small class="text-muted" style="font-size: 0.75rem; display: block; margin-top: 4px;">Enter the 6-digit code displayed in your authenticator app.</small>
+    <div id="backup-codes-pane" style="display: none;">
+        <div class="alert-banner alert-success">MFA is now active! Save these one-time recovery backup codes in a safe place—they will not be shown again.</div>
+        <div id="backup-codes-grid" class="code-box" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.95rem; margin-bottom: 1.25rem;"></div>
+        <div class="d-flex" style="justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" onclick="copyBackupCodes()">📋 Copy Codes</button>
+            <a href="/dashboard" class="btn btn-primary">Continue to Dashboard &rarr;</a>
         </div>
-        
-        <div class="d-flex" style="justify-content: space-between; margin-top: 2rem;">
-            <a href="/dashboard" class="btn btn-secondary" style="text-decoration: none;">Skip / Cancel</a>
-            <button type="submit" class="btn btn-primary">Enable MFA</button>
-        </div>
-    </form>
+    </div>
 </div>
+{% endblock %}
 
 {% block extra_js %}
 <script src="/static/js/qrious.min.js"></script>
 <script>
+let generatedBackupCodes = [];
+
 document.addEventListener("DOMContentLoaded", () => {
-    // Generate QR code client-side using QRious
-    const qrUri = "{{ totp_uri }}";
-    if (qrUri) {
+    const qrUri = {{ totp_uri | tojson }};
+    if (qrUri && typeof QRious !== "undefined") {
         new QRious({
             element: document.getElementById("qr-canvas"),
             value: qrUri,
             size: 200,
-            level: 'H'
+            level: "H"
         });
     }
 });
 
 async function verifyAndEnableMFA(event) {
     event.preventDefault();
-    const codeEl = document.getElementById("verification-code");
-    if (!codeEl) return;
-    const code = codeEl.value;
-    
+    const code = document.getElementById("verification-code").value.trim();
     showToast("Verifying MFA code...", "info");
-    
+
     try {
         const response = await fetch("/api/totp/verify", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
-            },
-            body: JSON.stringify({ secret: "{{ totp_secret }}", code: code })
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ secret: {{ totp_secret | tojson }}, code })
         });
-        
+        const data = await response.json();
         if (response.ok) {
+            generatedBackupCodes = data.backup_codes || [];
+            const grid = document.getElementById("backup-codes-grid");
+            grid.innerHTML = "";
+            generatedBackupCodes.forEach(c => {
+                const span = document.createElement("span");
+                span.textContent = c;
+                grid.appendChild(span);
+            });
+            document.getElementById("totp-enroll-pane").style.display = "none";
+            document.getElementById("backup-codes-pane").style.display = "block";
             showToast("MFA enabled successfully!", "success");
-            setTimeout(() => {
-                window.location.href = "/dashboard";
-            }, 1000);
         } else {
-            const data = await response.json();
-            showToast(data.detail || "Invalid code verification failed.", "error");
+            showToast(data.detail || "Verification failed.", "error");
         }
-    } catch(e) {
-        showToast("Error sending MFA verification code", "error");
+    } catch (e) {
+        showToast("Error verifying MFA code", "error");
     }
 }
+
+function copyBackupCodes() {
+    if (!generatedBackupCodes.length) return;
+    navigator.clipboard.writeText(generatedBackupCodes.join("\n")).then(() => {
+        showToast("Backup codes copied!", "success");
+    });
+}
 </script>
-{% endblock %}
 {% endblock %}

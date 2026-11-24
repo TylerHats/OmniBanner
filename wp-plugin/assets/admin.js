@@ -1,19 +1,70 @@
-jQuery(document).ready(function($) {
-    
-    // Sync Branding Click
-    $('#omnibanner-sync-btn').on('click', function(e) {
-        e.preventDefault();
-        
-        const apiUrl = $('#omnibanner-api-url').val();
-        if (!apiUrl) {
-            alert('Please enter a valid OmniBanner API URL before syncing.');
+jQuery(document).ready(function ($) {
+    function showAdminNotice(message, type) {
+        const $box = $('#omnibanner-admin-notice');
+        $box.removeClass('notice-success notice-error notice-info')
+            .addClass(type === 'error' ? 'notice-error' : (type === 'info' ? 'notice-info' : 'notice-success'))
+            .show();
+        $box.find('p').text(message);
+    }
+
+    function claimOnboardingLink(linkVal, $btn, defaultText) {
+        if (!linkVal) {
+            showAdminNotice(omnibanner_admin.i18n.enter_onboarding, 'error');
             return;
         }
-        
+        $btn.text(omnibanner_admin.i18n.connecting).prop('disabled', true);
+
+        $.ajax({
+            url: omnibanner_admin.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'omnibanner_claim_onboarding',
+                nonce: omnibanner_admin.nonce,
+                onboarding_link: linkVal
+            },
+            success: function (response) {
+                if (response.success) {
+                    showAdminNotice(response.data.message, 'success');
+                    setTimeout(function () {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('ob_pair');
+                        window.location.href = url.toString();
+                    }, 900);
+                } else {
+                    showAdminNotice((response.data && response.data.message) || 'Connection failed.', 'error');
+                }
+            },
+            error: function () {
+                showAdminNotice('AJAX request failed while connecting.', 'error');
+            },
+            complete: function () {
+                $btn.text(defaultText).prop('disabled', false);
+            }
+        });
+    }
+
+    $('#omnibanner-pair-btn').on('click', function (e) {
+        e.preventDefault();
+        claimOnboardingLink($('#omnibanner-onboarding-link').val().trim(), $(this), omnibanner_admin.i18n.connect_btn);
+    });
+
+    $('#omnibanner-confirm-deeplink-btn').on('click', function (e) {
+        e.preventDefault();
         const $btn = $(this);
-        const originalText = $btn.text();
-        $btn.text('Syncing...').prop('disabled', true);
-        
+        claimOnboardingLink($('#omnibanner-deeplink-url').val().trim(), $btn, $btn.text());
+    });
+
+    $('#omnibanner-sync-btn').on('click', function (e) {
+        e.preventDefault();
+        const apiUrl = $('#omnibanner-api-url').val().trim();
+        if (!apiUrl) {
+            showAdminNotice(omnibanner_admin.i18n.enter_api_url, 'error');
+            return;
+        }
+
+        const $btn = $(this);
+        $btn.text(omnibanner_admin.i18n.syncing).prop('disabled', true);
+
         $.ajax({
             url: omnibanner_admin.ajax_url,
             method: 'POST',
@@ -22,48 +73,76 @@ jQuery(document).ready(function($) {
                 nonce: omnibanner_admin.nonce,
                 api_url: apiUrl
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
-                    // Update form values
                     $('#omnibanner-cached-name').val(response.data.name);
                     $('#omnibanner-cached-icon').val(response.data.icon_url);
                     $('#omnibanner-cached-color').val(response.data.color);
-                    
-                    // Update page style accents dynamically
                     $('.omnibanner-admin-wrap').css('--brand-color', response.data.color);
-                    
-                    // Update header logo and title
                     $('.omnibanner-title').text(response.data.name + ' Settings');
-                    $('.omnibanner-brand-icon').attr('src', response.data.icon_url);
-                    
-                    alert('Branding successfully synced! Save options to finalize.');
+                    if (response.data.icon_url) {
+                        $('.omnibanner-brand-icon').attr('src', response.data.icon_url);
+                    }
+                    showAdminNotice('Branding and site configuration synced!', 'success');
                 } else {
-                    alert('Sync failed: ' + (response.data.message || 'Unknown server error'));
+                    showAdminNotice((response.data && response.data.message) || 'Sync failed.', 'error');
                 }
             },
-            error: function() {
-                alert('AJAX request failed. Check network parameters.');
+            error: function () {
+                showAdminNotice('AJAX sync request failed.', 'error');
             },
-            complete: function() {
-                $btn.text(originalText).prop('disabled', false);
+            complete: function () {
+                $btn.text(omnibanner_admin.i18n.sync_btn).prop('disabled', false);
             }
         });
     });
 
-    // Run Diagnostics Suite
-    $('#omnibanner-run-diag-btn').on('click', function(e) {
+    $('#omnibanner-disconnect-btn').on('click', function (e) {
         e.preventDefault();
-        const apiUrl = $('#omnibanner-api-url').val();
+        const $btn = $(this);
+        $btn.prop('disabled', true);
+        $.ajax({
+            url: omnibanner_admin.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'omnibanner_disconnect_site',
+                nonce: omnibanner_admin.nonce
+            },
+            success: function (response) {
+                if (response.success) {
+                    showAdminNotice(response.data.message, 'info');
+                    setTimeout(function () { window.location.reload(); }, 600);
+                }
+            },
+            complete: function () {
+                $btn.prop('disabled', false);
+            }
+        });
+    });
+
+    function updateDiagRow(key, check) {
+        const $status = $('#diag-status-' + key);
+        const $time = $('#diag-time-' + key);
+        $status.empty();
+        if (check && check.status === 'success') {
+            $status.append($('<span class="diag-badge green">').text(check.message));
+            $time.text(check.time + ' ms');
+        } else {
+            $status.append($('<span class="diag-badge red">').text((check && check.message) || 'Failed'));
+            $time.text('-');
+        }
+    }
+
+    $('#omnibanner-run-diag-btn').on('click', function (e) {
+        e.preventDefault();
+        const apiUrl = $('#omnibanner-api-url').val().trim();
         if (!apiUrl) {
-            alert('Please enter the API URL first.');
+            showAdminNotice(omnibanner_admin.i18n.enter_api_url, 'error');
             return;
         }
-
         const $btn = $(this);
-        $btn.text('Running Diagnostics...').prop('disabled', true);
-
-        // Reset badges to loading
-        $('.diag-badge').removeClass('green red').addClass('gray').text('Checking...');
+        $btn.text(omnibanner_admin.i18n.diag_running).prop('disabled', true);
+        $('.diag-badge').not('.omnibanner-header .diag-badge').removeClass('green red').addClass('gray').text('Checking...');
 
         $.ajax({
             url: omnibanner_admin.ajax_url,
@@ -73,53 +152,28 @@ jQuery(document).ready(function($) {
                 nonce: omnibanner_admin.nonce,
                 api_url: apiUrl
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
-                    const data = response.data;
-                    
-                    // Conn
-                    updateDiagRow('conn', data.conn);
-                    // Info
-                    updateDiagRow('info', data.info);
-                    // Banner
-                    updateDiagRow('banner', data.banner);
+                    updateDiagRow('conn', response.data.conn);
+                    updateDiagRow('info', response.data.info);
+                    updateDiagRow('banner', response.data.banner);
                 } else {
-                    alert('Diagnostics run failed: ' + response.data.message);
+                    showAdminNotice((response.data && response.data.message) || 'Diagnostics failed.', 'error');
                 }
             },
-            error: function() {
-                alert('Failed to connect to WordPress AJAX server.');
+            error: function () {
+                showAdminNotice('Failed to run diagnostics.', 'error');
             },
-            complete: function() {
-                $btn.text('🔬 Run Diagnostics Suite').prop('disabled', false);
+            complete: function () {
+                $btn.text(omnibanner_admin.i18n.diag_btn).prop('disabled', false);
             }
         });
     });
 
-    function updateDiagRow(key, check) {
-        const $status = $('#diag-status-' + key);
-        const $time = $('#diag-time-' + key);
-        
-        $status.empty();
-        if (check.status === 'success') {
-            $status.append($('<span class="diag-badge green">').text(check.message));
-            $time.text(check.time + ' ms');
-        } else {
-            $status.append($('<span class="diag-badge red">').text(check.message || 'Failed'));
-            $time.text('-');
-        }
-    }
-
-    // Flush Cached Options
-    $('#omnibanner-flush-btn').on('click', function(e) {
+    $('#omnibanner-flush-btn').on('click', function (e) {
         e.preventDefault();
-        if (!confirm('Are you sure you want to flush the cached branding logo, titles, and styles? This will revert back to defaults.')) {
-            return;
-        }
-
         const $btn = $(this);
         $btn.prop('disabled', true);
-
         $.ajax({
             url: omnibanner_admin.ajax_url,
             method: 'POST',
@@ -127,21 +181,15 @@ jQuery(document).ready(function($) {
                 action: 'omnibanner_flush_cache',
                 nonce: omnibanner_admin.nonce
             },
-            success: function(response) {
+            success: function (response) {
                 if (response.success) {
-                    alert('Branding cache successfully flushed. Reloading settings page.');
-                    window.location.reload();
-                } else {
-                    alert('Failed to flush cache.');
+                    showAdminNotice(response.data.message, 'success');
+                    setTimeout(function () { window.location.reload(); }, 600);
                 }
             },
-            error: function() {
-                alert('AJAX request failed.');
-            },
-            complete: function() {
+            complete: function () {
                 $btn.prop('disabled', false);
             }
         });
     });
 });
-

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}System Status &amp; Maintenance - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container" style="max-width: 820px; margin-top: 2.5rem;">
+    <div class="setup-header" style="margin-bottom: 1.5rem;">
+        <img src="{{ app_icon_url }}" alt="Logo" class="logo-img" style="height: 3.25rem; margin-bottom: 0.65rem;">
+        <h2>{{ app_name }} Status &amp; Maintenance</h2>
+        <p class="text-muted">Live service notices and upcoming maintenance schedules (UTC)</p>
+        <div class="mt-3">
+            <a href="/status.ics" class="btn btn-secondary btn-sm">📅 Subscribe to Calendar (.ics)</a>
+        </div>
+    </div>
+
+    {% if not active_notices %}
+        <div class="alert-banner alert-success" style="text-align: center; font-weight: 600;">
+            ✅ All Systems Operational — No active incident or maintenance banners right now.
+        </div>
+    {% else %}
+        <h3 class="mb-2" style="font-size: 1rem;">Active Notices</h3>
+        {% for n in active_notices %}
+        <div class="card" style="border-left: 4px solid {{ n.bg_color }}; padding: 1.1rem; margin-bottom: 0.9rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.45rem;">
+                <strong>{{ n.icon }} {{ n.title or "Active Notice" }}</strong>
+                <span class="badge badge-success">Active</span>
+            </div>
+            <div style="margin-bottom: 0.5rem;">{{ n.banner_text | safe }}</div>
+            <small class="text-muted">
+                Window: {{ n.scheduled_start }} &rarr; {{ n.scheduled_end }}
+                {% if n.target_type == "domains" and n.target_sites %} &middot; Sites: {{ n.target_sites }}{% endif %}
+                {% if n.target_type == "groups" and n.target_groups %} &middot; Groups: {{ n.target_groups }}{% endif %}
+            </small>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <h3 class="mb-2 mt-4" style="font-size: 1rem;">Upcoming Scheduled Maintenance</h3>
+    {% if not upcoming_notices %}
+        <p class="text-muted" style="font-size: 0.88rem;">No upcoming scheduled maintenance windows.</p>
+    {% else %}
+        {% for n in upcoming_notices %}
+        <div class="card" style="border-left: 4px solid {{ n.bg_color }}; padding: 1.1rem; margin-bottom: 0.9rem;">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.45rem;">
+                <strong>{{ n.icon }} {{ n.title or "Scheduled Maintenance" }}</strong>
+                <span class="badge badge-warning">Scheduled</span>
+            </div>
+            <div style="margin-bottom: 0.5rem;">{{ n.banner_text | safe }}</div>
+            <small class="text-muted">
+                Starts: {{ n.scheduled_start }} &middot; Ends: {{ n.scheduled_end }}
+                {% if n.target_type == "domains" and n.target_sites %} &middot; Sites: {{ n.target_sites }}{% endif %}
+                {% if n.target_type == "groups" and n.target_groups %} &middot; Groups: {{ n.target_groups }}{% endif %}
+            </small>
+        </div>
+        {% endfor %}
+    {% endif %}
+</div>
+{% endblock %}
+

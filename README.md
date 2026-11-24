@@ -1,73 +1,95 @@
 # OmniBanner
 
 <p align="center">
-  <img src="service/static/brand/logo.png" alt="OmniBanner Logo" width="160" height="160" style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+  <img src="service/static/brand/logo.png" alt="OmniBanner Logo" width="140" height="140" style="border-radius: 12px;" />
 </p>
 
-OmniBanner is a self-hosted notice banner manager featuring a central control service (written in Python/FastAPI) and a matching WordPress plugin. Schedule notifications, sync active events with Uptime Kuma maintenance profiles, send beautiful HTML alert campaigns to a subscriber list, and display notices dynamically on targeted websites without breaking page caching.
+OmniBanner is a self-hosted notice banner control plane (Python / FastAPI) with a companion **WordPress plugin** and **universal JS embed**. Schedule announcements, maintenance windows, and outage alerts centrally across all connected sites without breaking full-page caching.
 
 ---
 
-## Key Features
+## Highlights
 
-- **Onboarding Setup Flow:** Wizard on first boot to customize white-label name, brand accent colors, logo, auth modes, and connections.
-- **Dynamic Frontend Display:** Client-side JavaScript banner fetching to ensure compatibility with WordPress page-caching plugins (e.g. WP Rocket, LiteSpeed Cache). Includes dismiss cooldown limits and duration timers.
-- **Dual Uptime Kuma Integrations:** Coordinate schedules using simple Push webhooks or direct Socket.IO connection configurations to pause monitors and add native maintenance windows.
-- **SMTP Notification Engine:** Broadcast beautiful, responsive HTML email campaigns to a subscriber list when notices start.
-- **Secure Authentication:** Standard local admin login with client-side QR generation for TOTP MFA, or full OpenID Connect (OIDC) client endpoints auto-discovery (e.g. Authentik).
-- **White-Label Branding:** Exposes configuration settings dynamically to customize both the central dashboard and the WordPress settings page.
+- **Customizable White-Label Web UI:** Custom app name, uploaded logo & favicon, primary/secondary colors, Light/Dark/System theme toggle, login subtitle, footer text, custom CSS, banner preset templates, CTA buttons, live countdowns, and a 3-channel live preview (Website Banner + Desktop/Mobile + Email + Uptime Kuma Markdown).
+- **Per-Site Controls & Fleet Management:** Register sites via single-use **Onboarding Links** (or WordPress deep links), organize sites into groups/tags, override placement/mount selectors/z-index/paths/device/WP-role rules per site, and toggle a master kill-switch per site.
+- **OIDC Single Sign-On (Authentik & Others):** Multi-provider OIDC with PKCE (`S256`), `state`/`nonce` validation, JWKS ID-token signature verification, live `.well-known/openid-configuration` tester, Authentik group-to-role mapping (`admin` / `editor` / `viewer`), optional Forward-Auth proxy headers, and break-glass local admin + TOTP MFA with backup codes.
+- **Integrations:**
+  - **Uptime Kuma:** Push monitors, Socket.IO Direct API (auto-creating/updating scheduled maintenance windows or pausing monitors with a live monitor picker), plus **inbound alert webhooks** to automatically publish incident banners when a monitor goes down.
+  - **SMTP Campaigns:** Multipart HTML + plain-text emails, tag filtering, CSV import/export, and signed one-click unsubscribe links.
+  - **Outbound Webhooks & ChatOps:** Signed HMAC-SHA256 JSON webhooks, Slack, Discord, Microsoft Teams, and ntfy.
+- **Cache-Safe Performance:** Read-only cached public banner endpoints (`Cache-Control` + `ETag`) paired with `sendBeacon` buffered analytics and SQLite WAL mode (or PostgreSQL via `OMNIBANNER_DATABASE_URL`).
 
 ---
 
-## Directory Structure
+## Quick Start
 
+### Option 1: Docker Hub / Docker Compose
+
+Pull the prebuilt image from Docker Hub or build locally with Compose:
+
+```bash
+docker run -d --name omnibanner \
+  -p 8000:8000 \
+  -e OMNIBANNER_PUBLIC_URL=http://localhost:8000 \
+  -v omnibanner_data:/app/data \
+  -v omnibanner_uploads:/app/static/uploads \
+  tylerhats/omnibanner:latest
 ```
-OmniBanner/
-├── service/              # Central administrative web service (FastAPI)
-│   ├── config/           # White-label JSON parameters & logo backups
-│   ├── static/           # Front-end CSS stylesheets and JS assets
-│   ├── templates/        # Jinja2 layouts (Setup flow, login, pairing, dashboard)
-│   ├── main.py           # Core FastAPI application router & scheduler
-│   └── run.sh            # Quick server execution script
-├── wp-plugin/            # Matching WordPress banner plugin
-│   ├── assets/           # Dynamic branding sync JS/CSS & frontend assets
-│   └── omnibanner.php    # Main PHP settings panel & hook enqueuer
-└── README.md
+
+Or using Docker Compose:
+
+```bash
+cp .env.example .env
+# Edit .env with your OMNIBANNER_PUBLIC_URL and optional OMNIBANNER_SECRET_KEY
+docker compose up -d
 ```
 
----
+### Option 2: Standalone Linux / Local Run
 
-## Getting Started
+```bash
+cd service
+./run.sh
+```
 
-### 1. Central Web Service Setup
-
-To deploy the service in a clean standalone directory on any linux machine, run this single command to fetch the installer script:
+Or deploy on a fresh Linux host via the installer script:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/TylerHats/OmniBanner/main/install.sh | bash
 ```
 
-Alternatively, if you have already cloned the repository:
-1. Navigate to the `service` directory:
-   ```bash
-   cd service
-   ```
-2. Start the automated runner (which configures the `.venv` and installs packages):
-   ```bash
-   ./run.sh
-   ```
-
-Open your browser to `http://localhost:8000` to run the step-by-step **Onboarding Wizard** (`/setup`).
+Visit `http://localhost:8000` to run the 4-step **Onboarding Setup Wizard** (`/setup`).
 
 ---
 
-## WordPress Plugin Installation
+## WordPress Quick Connect Onboarding
 
-1. Log in to your WordPress Dashboard.
-2. Navigate to **Plugins** -> **Add New Plugin** and click **Upload Plugin** at the top.
-3. Select and upload the packaged [omnibanner.zip](file:///home/tylerhats/Documents/GitHub/OmniBanner/omnibanner.zip) file and click **Install Now**.
-4. Click **Activate Plugin** once the extraction completes.
-5. Select the **OmniBanner** setting link on the options sidebar.
-6. Input the URL of your OmniBanner central service (e.g., `http://localhost:8000`) and click **Sync Branding**.
-7. Click **Save Settings** to enable the banner on all frontend pages.
+1. Download [omnibanner.zip](omnibanner.zip) directly from the repo or GitHub Releases (or click **Download WP Plugin (.zip)** inside your OmniBanner dashboard under **Sites & Onboarding**).
+2. In WordPress, install and activate it via **Plugins -> Add New -> Upload Plugin**.
+3. In your **OmniBanner** dashboard, open **Sites & Onboarding** and click **Create One-Time Onboarding Link** (optionally enter your WordPress URL to generate a direct setup deep link).
+4. Paste the onboarding link into WordPress under **Settings -> OmniBanner -> Quick Connect via Onboarding Link** and click **Connect Site** (or click the deep link and confirm).
+5. Branding, site ID, per-site site key, and per-site display controls sync automatically in one step.
 
+### Public Status Page & Calendar Feed
+- Enable or customize the built-in public maintenance page at `/status` and iCalendar feed at `/status.ics` under **Branding**.
+
+### Non-WordPress Websites (Universal JS Embed)
+
+Copy the `<script src="https://banners.example.com/embed.js" data-api="https://banners.example.com" async></script>` snippet from the **Sites & Onboarding** tab into any HTML page.
+
+---
+
+## Authentik OIDC Setup
+
+1. Create an **OAuth2/OpenID Provider** in Authentik (Confidential client, scopes `openid`, `profile`, `email`, `groups`).
+2. Copy the **Callback Redirect URI** shown in OmniBanner (**Auth & OIDC** tab, e.g., `https://banners.example.com/auth/oidc/authentik/callback`) into Authentik's Redirect URIs.
+3. Paste Authentik's **Issuer URL**, **Client ID**, and **Client Secret** into OmniBanner, optionally map `omnibanner-admins` / `omnibanner-editors` / `omnibanner-viewers`, and click **Test Discovery**.
+
+---
+
+## Development & Tests
+
+```bash
+python3 -m py_compile service/*.py
+python3 -m unittest discover -s service/tests -v
+php -l wp-plugin/omnibanner.php
+```

@@ -1,0 +1,22 @@
+services:
+  omnibanner:
+    image: tylerhats/omnibanner:latest
+    build: .
+    container_name: omnibanner
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - OMNIBANNER_SECRET_KEY=${OMNIBANNER_SECRET_KEY:-}
+      - OMNIBANNER_PUBLIC_URL=${OMNIBANNER_PUBLIC_URL:-http://localhost:8000}
+      - OMNIBANNER_DATA_DIR=/app/data
+      # Optional PostgreSQL override:
+      # - OMNIBANNER_DATABASE_URL=postgresql+psycopg://user:pass@postgres:5432/omnibanner
+    volumes:
+      - omnibanner_data:/app/data
+      - omnibanner_uploads:/app/static/uploads
+
+volumes:
+  omnibanner_data:
+  omnibanner_uploads:
+

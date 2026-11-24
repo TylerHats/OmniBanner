@@ -1,128 +1,218 @@
+"""Uptime Kuma Push webhook and Socket.IO Direct API integrations."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+
 import httpx
-from uptime_kuma_api import UptimeKumaAPI, MaintenanceStrategy
 
-async def ping_kuma_push_url(push_url: str, is_active: bool, msg: str = "OmniBanner notice active") -> bool:
-    """
-    Pings Uptime Kuma Push Monitor.
-    If is_active is True, it represents the notice is running, which can trigger a down state
-    or maintenance state depending on how the user configured it, or simple status ping.
-    Typically, users set Push monitors in Uptime Kuma.
-    By default, we ping:
-    - Down: status=down&msg=Message
-    - Up: status=up&msg=Message
-    """
-    status = "down" if is_active else "up"
-    # Format url to add parameters
-    connector = "&" if "?" in push_url else "?"
-    full_url = f"{push_url}{connector}status={status}&msg={msg}"
-    
-    async with httpx.AsyncClient(verify=False) as client:
+try:
+    from uptime_kuma_api import MaintenanceStrategy, UptimeKumaApi
+except ImportError:  # pragma: no cover
+    MaintenanceStrategy = None  # type: ignore[assignment]
+    UptimeKumaApi = None  # type: ignore[assignment]
+
+
+async def ping_kuma_push_url(
+    push_url: str,
+    is_active: bool,
+    msg: str = "OmniBanner notice active",
+    verify_tls: bool = True,
+) -> bool:
+    """Ping an Uptime Kuma Push monitor with properly URL-encoded parameters."""
+    clean_url = (push_url or "").strip()
+    if not clean_url:
+        return False
+    status_val = "down" if is_active else "up"
+    params = {"status": status_val, "msg": (msg or "OmniBanner notice")[:250]}
+
+    async with httpx.AsyncClient(verify=verify_tls) as client:
         try:
-            response = await client.get(full_url, timeout=10.0)
-            if response.status_code == 200:
-                return True
-        except Exception as e:
-            print(f"Failed to ping Uptime Kuma Push URL: {e}")
-    return False
+            response = await client.get(clean_url, params=params, timeout=10.0)
+            return 200 <= response.status_code < 300
+        except Exception as exc:
+            print(f"Failed to ping Uptime Kuma Push URL: {exc}")
+            return False
 
-def sync_kuma_direct_maintenance(kuma_url: str, username: str, password: str, title: str, description: str, start_time, end_time, monitor_ids: list) -> bool:
-    """
-    Direct Socket.IO API connection to Uptime Kuma using the third party python library.
-    We connect, log in, and add a Maintenance Window for the specified monitor IDs.
-    """
+
+def _require_kuma_lib() -> None:
+    if UptimeKumaApi is None or MaintenanceStrategy is None:
+        raise RuntimeError("uptime-kuma-api library is not installed")
+
+
+def test_kuma_connection(
+    kuma_url: str,
+    username: str,
+    password: str,
+    verify_tls: bool = True,
+) -> tuple[bool, int, str]:
+    """Verify Uptime Kuma Socket.IO credentials and return (ok, monitor_count, detail)."""
     try:
-        # Connect using the client
-        # UptimeKumaAPI requires url as the first parameter
-        with UptimeKumaAPI(kuma_url) as api:
+        _require_kuma_lib()
+        with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
             api.login(username, password)
-            
-            # Format dates to string as required by Uptime Kuma Socket API
-            # Format: 'YYYY-MM-DD HH:MM:SS'
-            start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
-            end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Create a maintenance window
-            # Strategy: 'manual' (we can manage active manually) or 'cron' or 'schedule'
-            # Let's check: strategy parameter in uptime_kuma_api expects the type or string
-            # In Uptime Kuma, the strategies are:
-            # - cron (Cron expression)
-            # - manual (Manual toggle)
-            # - schedule (One-time scheduled window)
-            # We want 'schedule' for scheduled notices!
-            maintenance = api.add_maintenance(
-                title=title,
-                description=description,
-                strategy="schedule",
-                start_date=start_str,
-                end_date=end_str,
-                active=True
+            monitors = api.get_monitors() or []
+            return True, len(monitors), f"Connected ({len(monitors)} monitors found)"
+    except Exception as exc:
+        return False, 0, str(exc)
+
+
+def list_kuma_monitors(
+    kuma_url: str,
+    username: str,
+    password: str,
+    verify_tls: bool = True,
+) -> list[dict[str, Any]]:
+    """Fetch monitors from Uptime Kuma for UI multi-select picker."""
+    _require_kuma_lib()
+    with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
+        api.login(username, password)
+        monitors = api.get_monitors() or []
+        results: list[dict[str, Any]] = []
+        for mon in monitors:
+            if mon.get("id") is None:
+                continue
+            results.append(
+                {
+                    "id": int(mon["id"]),
+                    "name": mon.get("name") or f"Monitor #{mon['id']}",
+                    "type": str(mon.get("type") or ""),
+                    "active": bool(mon.get("active", True)),
+                }
             )
-            
-            maintenance_id = maintenance.get("id")
-            
-            # Link monitors to maintenance
-            # We can use the api.edit_maintenance or Uptime Kuma lets us assign monitor list
-            # In Uptime Kuma API: edit_maintenance(id, title, ..., monitor_list=[1, 2, 3])
-            # Let's check: the add_maintenance can take monitor_list or we edit it.
-            # Usually, monitors are linked in the edit / creation object as 'monitors' or 'monitor_list'.
-            # The library supports monitor_list in add_maintenance / edit_maintenance.
-            # Let's map integer monitor IDs:
-            valid_monitor_ids = []
-            for mid in monitor_ids:
+        return results
+
+
+def sync_kuma_direct_maintenance(
+    kuma_url: str,
+    username: str,
+    password: str,
+    title: str,
+    description: str,
+    start_time: datetime,
+    end_time: datetime,
+    monitor_ids: list[Any],
+    existing_maintenance_id: Optional[int] = None,
+    verify_tls: bool = True,
+) -> Optional[int]:
+    """Create or update a scheduled single maintenance window and link monitors."""
+    try:
+        _require_kuma_lib()
+        start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        valid_monitor_ids: list[int] = []
+        for mid in monitor_ids:
+            try:
+                valid_monitor_ids.append(int(str(mid).strip()))
+            except (ValueError, TypeError):
+                continue
+
+        with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
+            api.login(username, password)
+            maintenance_id: Optional[int] = None
+
+            if existing_maintenance_id:
                 try:
-                    valid_monitor_ids.append(int(mid))
-                except ValueError:
-                    pass
-            
-            if valid_monitor_ids:
-                # We can call edit_maintenance to link monitors or include it in add_maintenance
-                # Let's edit it to link the monitors:
-                api.edit_maintenance(
-                    id=maintenance_id,
+                    api.edit_maintenance(
+                        int(existing_maintenance_id),
+                        title=title,
+                        description=description,
+                        strategy=MaintenanceStrategy.SINGLE,
+                        active=True,
+                        dateRange=[start_str, end_str],
+                        timezoneOption="UTC",
+                    )
+                    maintenance_id = int(existing_maintenance_id)
+                except Exception:
+                    maintenance_id = None
+
+            if not maintenance_id:
+                res = api.add_maintenance(
                     title=title,
                     description=description,
-                    strategy="schedule",
-                    start_date=start_str,
-                    end_date=end_str,
+                    strategy=MaintenanceStrategy.SINGLE,
                     active=True,
-                    monitors=[{"id": m_id} for m_id in valid_monitor_ids]
+                    dateRange=[start_str, end_str],
+                    timezoneOption="UTC",
                 )
-            
+                raw_id = res.get("maintenanceID") or res.get("id")
+                if raw_id is not None:
+                    maintenance_id = int(raw_id)
+
+            if maintenance_id and valid_monitor_ids:
+                api.add_monitor_maintenance(
+                    maintenance_id,
+                    [{"id": m_id} for m_id in valid_monitor_ids],
+                )
+
+            return maintenance_id
+    except Exception as exc:
+        print(f"Uptime Kuma Direct Integration Error: {exc}")
+        return existing_maintenance_id
+
+
+def delete_kuma_maintenance(
+    kuma_url: str,
+    username: str,
+    password: str,
+    maintenance_id: int,
+    verify_tls: bool = True,
+) -> bool:
+    """Delete a maintenance window in Uptime Kuma."""
+    try:
+        _require_kuma_lib()
+        with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
+            api.login(username, password)
+            api.delete_maintenance(int(maintenance_id))
             return True
-    except Exception as e:
-        print(f"Uptime Kuma Direct Integration Error: {e}")
+    except Exception as exc:
+        print(f"Uptime Kuma Delete Maintenance Error: {exc}")
         return False
 
-def pause_kuma_monitors(kuma_url: str, username: str, password: str, monitor_ids: list) -> bool:
-    """
-    Alternative action: Connect to Uptime Kuma and pause the monitors immediately.
-    """
+
+def pause_kuma_monitors(
+    kuma_url: str,
+    username: str,
+    password: str,
+    monitor_ids: list[Any],
+    verify_tls: bool = True,
+) -> bool:
+    """Connect to Uptime Kuma and pause specified monitors."""
     try:
-        with UptimeKumaAPI(kuma_url) as api:
+        _require_kuma_lib()
+        with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
             api.login(username, password)
             for m_id in monitor_ids:
                 try:
-                    api.pause_monitor(int(m_id))
+                    api.pause_monitor(int(str(m_id).strip()))
                 except Exception as ex:
                     print(f"Failed to pause monitor {m_id}: {ex}")
             return True
-    except Exception as e:
-        print(f"Uptime Kuma Pause Monitor Error: {e}")
+    except Exception as exc:
+        print(f"Uptime Kuma Pause Monitor Error: {exc}")
         return False
 
-def resume_kuma_monitors(kuma_url: str, username: str, password: str, monitor_ids: list) -> bool:
-    """
-    Alternative action: Connect to Uptime Kuma and resume the monitors.
-    """
+
+def resume_kuma_monitors(
+    kuma_url: str,
+    username: str,
+    password: str,
+    monitor_ids: list[Any],
+    verify_tls: bool = True,
+) -> bool:
+    """Connect to Uptime Kuma and resume specified monitors."""
     try:
-        with UptimeKumaAPI(kuma_url) as api:
+        _require_kuma_lib()
+        with UptimeKumaApi(kuma_url, ssl_verify=verify_tls) as api:
             api.login(username, password)
             for m_id in monitor_ids:
                 try:
-                    api.resume_monitor(int(m_id))
+                    api.resume_monitor(int(str(m_id).strip()))
                 except Exception as ex:
                     print(f"Failed to resume monitor {m_id}: {ex}")
             return True
-    except Exception as e:
-        print(f"Uptime Kuma Resume Monitor Error: {e}")
+    except Exception as exc:
+        print(f"Uptime Kuma Resume Monitor Error: {exc}")
         return False

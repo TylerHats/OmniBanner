@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Site Onboarding Link - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container" style="max-width: 560px; margin-top: 4rem;">
+    <div class="setup-header">
+        <img src="{{ app_icon_url }}" alt="Logo" class="logo-img" style="height: 3rem; margin-bottom: 0.75rem;">
+        <h2>WordPress Onboarding Link</h2>
+    </div>
+
+    {% if status_state == "valid" %}
+        <div class="alert-banner alert-success">This one-time onboarding link is active and ready to pair a WordPress site.</div>
+        {% if preset_name %}<p class="mb-2"><strong>Site Name:</strong> {{ preset_name }}</p>{% endif %}
+        {% if preset_groups %}<p class="mb-2"><strong>Groups:</strong> {{ preset_groups }}</p>{% endif %}
+        <p class="text-muted mb-3" style="font-size: 0.85rem;">Copy this link and paste it into <strong>Settings &rarr; {{ app_name }} &rarr; Quick Connect</strong> inside your WordPress admin dashboard:</p>
+        <div class="code-box mb-3" id="pairing-link-box">{{ pairing_url }}</div>
+        <button type="button" class="btn btn-primary" style="width: 100%;" onclick="navigator.clipboard.writeText(document.getElementById('pairing-link-box').textContent).then(() => showToast('Onboarding link copied!', 'success'))">📋 Copy Onboarding Link</button>
+    {% elif status_state == "used" %}
+        <div class="alert-banner alert-info">This onboarding link has already been claimed by a site. Generate a new link from the Sites tab to connect another site.</div>
+    {% elif status_state == "expired" %}
+        <div class="alert-banner alert-danger">This onboarding link has expired. Please generate a fresh link from the {{ app_name }} dashboard.</div>
+    {% else %}
+        <div class="alert-banner alert-danger">Invalid onboarding link.</div>
+    {% endif %}
+</div>
+{% endblock %}
+

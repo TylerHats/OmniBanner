@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+.gitignore
+**/.venv
+**/__pycache__
+*.pyc
+*.pyo
+service/data
+service/static/uploads
+service/tests
+wp-plugin
+README.md
+install.sh
+docker-compose.yml
+

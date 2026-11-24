@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Unsubscribe - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="setup-container" style="max-width: 480px; margin-top: 4.5rem;">
+    <div class="setup-header">
+        <img src="{{ app_icon_url }}" alt="Logo" class="logo-img" style="height: 3rem; margin-bottom: 0.75rem;">
+        <h2>Email Preferences</h2>
+    </div>
+    {% if unsubscribed %}
+        <div class="alert-banner alert-success">
+            <strong>{{ email_label }}</strong> has been unsubscribed from {{ app_name }} notifications.
+        </div>
+    {% else %}
+        <div class="alert-banner alert-danger">
+            This unsubscribe link is invalid or no longer active.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
