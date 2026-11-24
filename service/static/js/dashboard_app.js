@@ -786,6 +786,13 @@
 
                 const tdVer = document.createElement("td");
                 tdVer.textContent = s.plugin_version ? `v${s.plugin_version} / WP ${s.wp_version || "?"}` : "Manual";
+                if (s.plugin_version && s.update_available && s.latest_plugin_version) {
+                    const upd = document.createElement("span");
+                    upd.className = "badge badge-warning";
+                    upd.style.marginLeft = "6px";
+                    upd.textContent = `Update v${s.latest_plugin_version}`;
+                    tdVer.appendChild(upd);
+                }
 
                 const tdSt = document.createElement("td");
                 tdSt.textContent = `${s.stats.views} / ${s.stats.dismisses} / ${s.stats.clicks}`;

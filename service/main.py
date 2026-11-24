@@ -7,6 +7,7 @@ import csv
 import fcntl
 import fnmatch
 import hashlib
+import html as html_lib
 import io
 import ipaddress
 import json
@@ -118,6 +119,8 @@ _CSRF_EXEMPT_PREFIXES = (
     "/api/inbound/",
 )
 _VALID_ROLES = ("admin", "editor", "viewer")
+APP_VERSION = "2.1.0"
+_PLUGIN_ARTIFACT_CACHE: dict[str, Any] = {"cache_key": None, "artifact": None}
 
 
 def _reset_rate_limiters() -> None:
@@ -452,7 +455,7 @@ async def lifespan(_app: FastAPI):
                 os.close(lock_fd)
 
 
-app = FastAPI(title="OmniBanner Central Service", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="OmniBanner Central Service", version=APP_VERSION, lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -639,9 +642,142 @@ def _parse_site_settings(raw_json: Optional[str]) -> dict[str, Any]:
     return merged
 
 
-def _serialize_site(site: Site, stats: Optional[dict[str, int]] = None) -> dict[str, Any]:
+def _parse_semver_tuple(version_str: str) -> tuple[int, ...]:
+    nums = [int(n) for n in re.findall(r"\d+", version_str or "")]
+    return tuple(nums) if nums else (0,)
+
+
+def _extract_wp_header(php_text: str, field: str, default: str = "") -> str:
+    m = re.search(rf"^\s*\*\s*{re.escape(field)}\s*:\s*(.+?)\s*$", php_text, flags=re.MULTILINE)
+    return m.group(1).strip() if m else default
+
+
+def _format_wp_changelog_html(changelog_body: str) -> str:
+    lines = []
+    in_list = False
+    for raw_line in changelog_body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading_match = re.match(r"^=+\s*(.+?)\s*=+$", line)
+        if heading_match:
+            if in_list:
+                lines.append("</ul>")
+                in_list = False
+            lines.append(f"<h4>{html_lib.escape(heading_match.group(1))}</h4>")
+            continue
+        bullet_match = re.match(r"^[-*]\s+(.+)$", line)
+        if bullet_match:
+            if not in_list:
+                lines.append("<ul>")
+                in_list = True
+            lines.append(f"<li>{html_lib.escape(bullet_match.group(1))}</li>")
+            continue
+        if in_list:
+            lines.append("</ul>")
+            in_list = False
+        lines.append(f"<p>{html_lib.escape(line)}</p>")
+    if in_list:
+        lines.append("</ul>")
+    return "\n".join(lines) or "<p>Self-hosted OmniBanner WordPress plugin update.</p>"
+
+
+def _get_plugin_artifact() -> Optional[dict[str, Any]]:
+    """Load packaged omnibanner.zip (or zip wp-plugin/) with cached metadata and SHA-256."""
+    zip_bytes: Optional[bytes] = None
+    cache_key: Any = None
+    mtime_ts = 0.0
+
+    for candidate in (
+        os.path.join(BASE_DIR, "omnibanner.zip"),
+        os.path.join(os.path.dirname(BASE_DIR), "omnibanner.zip"),
+    ):
+        if os.path.isfile(candidate):
+            st = os.stat(candidate)
+            cache_key = ("zip", candidate, st.st_mtime_ns, st.st_size)
+            if _PLUGIN_ARTIFACT_CACHE.get("cache_key") == cache_key and _PLUGIN_ARTIFACT_CACHE.get("artifact"):
+                return _PLUGIN_ARTIFACT_CACHE["artifact"]
+            with open(candidate, "rb") as f:
+                zip_bytes = f.read()
+            mtime_ts = st.st_mtime
+            break
+
+    if zip_bytes is None:
+        wp_dir = os.path.join(os.path.dirname(BASE_DIR), "wp-plugin")
+        if os.path.isdir(wp_dir):
+            mtimes = []
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for dirpath, _, filenames in os.walk(wp_dir):
+                    for fn in sorted(filenames):
+                        full = os.path.join(dirpath, fn)
+                        mtimes.append((full, os.stat(full).st_mtime_ns))
+                        zf.write(full, os.path.join("omnibanner", os.path.relpath(full, wp_dir)))
+            zip_bytes = buf.getvalue()
+            mtime_ts = max((m[1] for m in mtimes), default=0) / 1_000_000_000
+            cache_key = ("dir", tuple(mtimes))
+
+    if not zip_bytes:
+        return None
+
+    sha256 = hashlib.sha256(zip_bytes).hexdigest()
+    php_text = ""
+    readme_text = ""
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            if "omnibanner/omnibanner.php" in zf.namelist():
+                php_text = zf.read("omnibanner/omnibanner.php").decode("utf-8", errors="replace")
+            if "omnibanner/readme.txt" in zf.namelist():
+                readme_text = zf.read("omnibanner/readme.txt").decode("utf-8", errors="replace")
+    except Exception:
+        pass
+
+    tested_match = re.search(r"^\s*Tested up to\s*:\s*(.+?)\s*$", readme_text, flags=re.MULTILINE)
+    changelog_match = re.search(r"==\s*Changelog\s*==\s*(.*)$", readme_text, flags=re.DOTALL | re.IGNORECASE)
+    changelog_html = _format_wp_changelog_html(changelog_match.group(1) if changelog_match else "")
+
+    description = _extract_wp_header(
+        php_text,
+        "Description",
+        "Connect your WordPress site to a self-hosted OmniBanner server to display cache-safe scheduled notices.",
+    )
+    last_updated = datetime.fromtimestamp(mtime_ts or utcnow().timestamp(), tz=timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    artifact = {
+        "bytes": zip_bytes,
+        "sha256": sha256,
+        "size": len(zip_bytes),
+        "name": _extract_wp_header(php_text, "Plugin Name", "OmniBanner"),
+        "version": _extract_wp_header(php_text, "Version", APP_VERSION),
+        "requires": _extract_wp_header(php_text, "Requires at least", "5.8"),
+        "requires_php": _extract_wp_header(php_text, "Requires PHP", "7.4"),
+        "tested": tested_match.group(1).strip() if tested_match else "6.8",
+        "author": _extract_wp_header(php_text, "Author", "Tyler Hatfield"),
+        "homepage": _extract_wp_header(php_text, "Plugin URI", "https://github.com/TylerHats/OmniBanner"),
+        "description": description,
+        "changelog_html": changelog_html,
+        "last_updated": last_updated,
+    }
+    _PLUGIN_ARTIFACT_CACHE["cache_key"] = cache_key
+    _PLUGIN_ARTIFACT_CACHE["artifact"] = artifact
+    return artifact
+
+
+def _serialize_site(
+    site: Site,
+    stats: Optional[dict[str, int]] = None,
+    latest_plugin_version: Optional[str] = None,
+) -> dict[str, Any]:
     now = utcnow()
     online = bool(site.last_seen_at and (now - site.last_seen_at) <= timedelta(hours=24))
+    if latest_plugin_version is None:
+        art = _get_plugin_artifact()
+        latest_plugin_version = (art.get("version") if art else None) or APP_VERSION
+    cur_ver = (site.plugin_version or "").strip()
+    update_available = bool(
+        cur_ver and _parse_semver_tuple(cur_ver) < _parse_semver_tuple(latest_plugin_version)
+    )
     return {
         "id": site.id,
         "name": site.name,
@@ -650,7 +786,9 @@ def _serialize_site(site: Site, stats: Optional[dict[str, int]] = None) -> dict[
         "site_key_prefix": site.site_key_prefix,
         "groups": site.groups or "",
         "enabled": bool(site.enabled),
-        "plugin_version": site.plugin_version or "",
+        "plugin_version": cur_ver,
+        "latest_plugin_version": latest_plugin_version,
+        "update_available": update_available,
         "wp_version": site.wp_version or "",
         "last_seen_at": _fmt_utc(site.last_seen_at),
         "created_at": _fmt_utc(site.created_at),
@@ -1169,7 +1307,7 @@ async def get_embed_js():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 # --- SETUP API ---
@@ -1984,7 +2122,9 @@ async def list_sites(_user: User = Depends(require_user), db: Session = Depends(
         bucket["views"] += row.views_count or 0
         bucket["dismisses"] += row.dismiss_count or 0
         bucket["clicks"] += row.clicks_count or 0
-    return [_serialize_site(s, by_site.get(s.id)) for s in sites]
+    art = _get_plugin_artifact()
+    latest_ver = (art.get("version") if art else None) or APP_VERSION
+    return [_serialize_site(s, by_site.get(s.id), latest_ver) for s in sites]
 
 
 @app.post("/api/sites")
@@ -3339,36 +3479,79 @@ async def receive_inbound_webhook(token: str, payload: dict, db: Session = Depen
 # --- LOCAL WORDPRESS PLUGIN DOWNLOAD & CONFIG BACKUP/RESTORE ---
 
 
+@app.get("/api/public/plugin/manifest.json")
+async def get_public_plugin_manifest(request: Request, db: Session = Depends(get_db)):
+    artifact = _get_plugin_artifact()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="WordPress plugin archive not found")
+
+    config = db.query(SystemConfig).first()
+    base_url = resolve_public_base_url(request, config.public_base_url if config else "")
+    icon_path = (config.app_icon_url if config else "") or "/static/brand/logo.png"
+    icon_url = icon_path if icon_path.startswith("http") else f"{base_url}/{icon_path.lstrip('/')}"
+    download_url = f"{base_url}/api/public/plugin/download"
+    brand_name = (config.app_name if config and config.app_name else artifact["name"])
+
+    return JSONResponse(
+        content={
+            "slug": "omnibanner",
+            "plugin": "omnibanner/omnibanner.php",
+            "name": brand_name,
+            "version": artifact["version"],
+            "author": artifact["author"],
+            "homepage": artifact["homepage"],
+            "requires": artifact["requires"],
+            "tested": artifact["tested"],
+            "requires_php": artifact["requires_php"],
+            "last_updated": artifact["last_updated"],
+            "download_url": download_url,
+            "package": download_url,
+            "sha256": artifact["sha256"],
+            "size": artifact["size"],
+            "icons": {
+                "1x": icon_url,
+                "2x": icon_url,
+                "default": icon_url,
+            },
+            "sections": {
+                "description": f"<p>{html_lib.escape(artifact['description'])}</p>",
+                "changelog": artifact["changelog_html"],
+            },
+        },
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/api/public/plugin/download")
+async def download_public_wp_plugin():
+    artifact = _get_plugin_artifact()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="WordPress plugin archive not found")
+    return Response(
+        content=artifact["bytes"],
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="omnibanner.zip"',
+            "X-OmniBanner-SHA256": artifact["sha256"],
+            "ETag": f'"{artifact["sha256"]}"',
+            "Cache-Control": "public, max-age=300",
+        },
+    )
+
+
 @app.get("/api/plugin/download")
 async def download_wp_plugin(_user: User = Depends(require_user)):
-    for candidate in (
-        os.path.join(BASE_DIR, "omnibanner.zip"),
-        os.path.join(os.path.dirname(BASE_DIR), "omnibanner.zip"),
-    ):
-        if os.path.isfile(candidate):
-            return FileResponse(
-                candidate,
-                media_type="application/zip",
-                filename="omnibanner.zip",
-            )
-
-    wp_dir = os.path.join(os.path.dirname(BASE_DIR), "wp-plugin")
-    if os.path.isdir(wp_dir):
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for dirpath, _, filenames in os.walk(wp_dir):
-                for fn in sorted(filenames):
-                    full = os.path.join(dirpath, fn)
-                    rel = os.path.relpath(full, wp_dir)
-                    zf.write(full, os.path.join("omnibanner", rel))
-        buf.seek(0)
-        return StreamingResponse(
-            buf,
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="omnibanner.zip"'},
-        )
-
-    raise HTTPException(status_code=404, detail="WordPress plugin archive not found")
+    artifact = _get_plugin_artifact()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="WordPress plugin archive not found")
+    return Response(
+        content=artifact["bytes"],
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="omnibanner.zip"',
+            "X-OmniBanner-SHA256": artifact["sha256"],
+        },
+    )
 
 
 @app.get("/api/backup/export")
@@ -3381,7 +3564,7 @@ async def export_backup(request: Request, user: User = Depends(require_admin), d
     hook_rows = db.query(IntegrationWebhook).order_by(IntegrationWebhook.id.asc()).all()
 
     payload = {
-        "version": "2.0.0",
+        "version": APP_VERSION,
         "exported_at": _fmt_utc(utcnow()),
         "brand": brand,
         "templates": [

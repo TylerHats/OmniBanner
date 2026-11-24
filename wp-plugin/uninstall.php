@@ -12,10 +12,13 @@ $omnibanner_options = array(
     'omnibanner_cached_color',
     'omnibanner_site_config',
     'omnibanner_local_enabled',
+    'omnibanner_reported_version',
 );
 
 foreach ($omnibanner_options as $option_name) {
     delete_option($option_name);
     delete_site_option($option_name);
 }
+
+delete_transient('omnibanner_update_manifest');
 

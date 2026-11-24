@@ -69,6 +69,11 @@ Visit `http://localhost:8000` to run the 4-step **Onboarding Setup Wizard** (`/s
 4. Paste the onboarding link into WordPress under **Settings -> OmniBanner -> Quick Connect via Onboarding Link** and click **Connect Site** (or click the deep link and confirm).
 5. Branding, site ID, per-site site key, and per-site display controls sync automatically in one step.
 
+### Self-Hosted WordPress Auto-Updates
+
+- Connected WordPress sites automatically check your OmniBanner server (`/api/public/plugin/manifest.json`) for plugin updates, verify package SHA-256 checksums (`/api/public/plugin/download`), display native **View version details** changelogs, and support WordPress's built-in **Enable auto-updates** toggle on **Plugins -> Installed Plugins**.
+- When an OmniBanner server upgrade bundles a newer plugin version, any connected site running an older version shows an **Update** badge in **Sites & Onboarding** until upgraded.
+
 ### Public Status Page & Calendar Feed
 - Enable or customize the built-in public maintenance page at `/status` and iCalendar feed at `/status.ics` under **Branding**.
 

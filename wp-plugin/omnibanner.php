@@ -3,12 +3,13 @@
  * Plugin Name: OmniBanner
  * Plugin URI: https://github.com/TylerHats/OmniBanner
  * Description: Connect your WordPress site to a self-hosted OmniBanner server using a one-time onboarding link to display cache-safe scheduled notices.
- * Version: 2.0.0
+ * Version: 2.1.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: Tyler Hatfield
  * License: GPLv3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
+ * Update URI: false
  * Text Domain: omnibanner
  */
 
@@ -16,13 +17,14 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('OMNIBANNER_VERSION', '2.0.0');
+define('OMNIBANNER_VERSION', '2.1.0');
 
 class OmniBannerPlugin {
 
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_init', array($this, 'maybe_report_version_upgrade'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_plugin_action_links'));
 
@@ -33,6 +35,13 @@ class OmniBannerPlugin {
         add_action('wp_ajax_omnibanner_disconnect_site', array($this, 'ajax_disconnect_site'));
         add_action('wp_ajax_omnibanner_run_diagnostics', array($this, 'ajax_run_diagnostics'));
         add_action('wp_ajax_omnibanner_flush_cache', array($this, 'ajax_flush_cache'));
+        add_action('wp_ajax_omnibanner_check_updates', array($this, 'ajax_check_updates'));
+
+        add_filter('pre_set_site_transient_update_plugins', array($this, 'check_for_plugin_update'));
+        add_filter('site_transient_update_plugins', array($this, 'filter_stale_update_transient'));
+        add_filter('plugins_api', array($this, 'plugin_update_info'), 20, 3);
+        add_filter('upgrader_pre_download', array($this, 'verify_and_download_package'), 10, 4);
+        add_action('upgrader_process_complete', array($this, 'after_plugin_upgrade'), 10, 2);
     }
 
     public function add_plugin_action_links($links) {
@@ -140,6 +149,8 @@ class OmniBannerPlugin {
                 'sync_btn' => __('Sync Branding & Config', 'omnibanner'),
                 'diag_running' => __('Running Diagnostics...', 'omnibanner'),
                 'diag_btn' => __('Run Diagnostics Suite', 'omnibanner'),
+                'checking_updates' => __('Checking for updates...', 'omnibanner'),
+                'check_updates_btn' => __('Check for Updates', 'omnibanner'),
                 'enter_onboarding' => __('Please paste a valid OmniBanner onboarding link.', 'omnibanner'),
                 'enter_api_url' => __('Please enter a valid OmniBanner URL first.', 'omnibanner'),
             ),
@@ -351,6 +362,28 @@ class OmniBannerPlugin {
                     <button type="button" class="button button-secondary" id="omnibanner-flush-btn"><?php esc_html_e('Reset Cached Branding', 'omnibanner'); ?></button>
                 </div>
             </div>
+
+            <div class="card omnibanner-card" style="margin-top: 20px;">
+                <h2 class="title"><?php esc_html_e('Self-Hosted Plugin Updates', 'omnibanner'); ?></h2>
+                <p><?php esc_html_e('Updates and SHA-256 package verification pull directly from your connected OmniBanner server. Enable automatic background updates on the Plugins screen.', 'omnibanner'); ?></p>
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px;">
+                    <span>
+                        <?php esc_html_e('Installed:', 'omnibanner'); ?>
+                        <strong>v<?php echo esc_html(OMNIBANNER_VERSION); ?></strong>
+                    </span>
+                    <span id="omnibanner-update-status">
+                        <?php if (!empty($api_url)) : ?>
+                            <span class="diag-badge gray"><?php esc_html_e('Ready to check server', 'omnibanner'); ?></span>
+                        <?php else : ?>
+                            <span class="diag-badge gray"><?php esc_html_e('Connect server first', 'omnibanner'); ?></span>
+                        <?php endif; ?>
+                    </span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; align-items: center;">
+                    <button type="button" class="button button-secondary" id="omnibanner-check-updates-btn"><?php esc_html_e('Check for Updates', 'omnibanner'); ?></button>
+                    <a class="button button-secondary" href="<?php echo esc_url(admin_url('plugins.php')); ?>"><?php esc_html_e('Manage WordPress Auto-Updates', 'omnibanner'); ?> &rarr;</a>
+                </div>
+            </div>
         </div>
         <?php
     }
@@ -455,11 +488,14 @@ class OmniBannerPlugin {
         update_option('omnibanner_site_id', absint($body['site_id']));
         update_option('omnibanner_site_key', sanitize_text_field($body['site_key']));
         update_option('omnibanner_local_enabled', true);
+        update_option('omnibanner_reported_version', OMNIBANNER_VERSION);
 
         if (isset($body['settings']) && is_array($body['settings'])) {
             update_option('omnibanner_site_config', wp_json_encode($body['settings']));
         }
         $branding = $this->apply_remote_branding($api_url, isset($body['branding']) ? $body['branding'] : array());
+        delete_transient('omnibanner_update_manifest');
+        delete_site_transient('update_plugins');
 
         wp_send_json_success(array(
             'api_url' => $api_url,
@@ -586,6 +622,281 @@ class OmniBannerPlugin {
         update_option('omnibanner_cached_icon', '');
         update_option('omnibanner_cached_color', '#8b5cf6');
         wp_send_json_success(array('message' => __('Cached branding reset to defaults.', 'omnibanner')));
+    }
+
+    private function get_trusted_package_url($api_url) {
+        $clean = $this->sanitize_api_url($api_url);
+        return $clean ? ($clean . '/api/public/plugin/download') : '';
+    }
+
+    private function fetch_update_manifest($force = false) {
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        if (empty($api_url)) {
+            return null;
+        }
+        if (is_admin() && isset($_GET['force-check'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $force = true;
+        }
+        if (!$force) {
+            $cached = get_transient('omnibanner_update_manifest');
+            if (is_array($cached) && !empty($cached['version']) && !empty($cached['sha256'])) {
+                return $cached;
+            }
+        }
+
+        $res = wp_remote_get($api_url . '/api/public/plugin/manifest.json', $this->http_args(10));
+        if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) {
+            return null;
+        }
+        $data = json_decode(wp_remote_retrieve_body($res), true);
+        if (!is_array($data) || empty($data['version']) || empty($data['sha256'])) {
+            return null;
+        }
+        $sha = strtolower(trim((string) $data['sha256']));
+        if (!preg_match('/^[a-f0-9]{64}$/', $sha)) {
+            return null;
+        }
+        $data['sha256'] = $sha;
+        $data['package'] = $this->get_trusted_package_url($api_url);
+        set_transient('omnibanner_update_manifest', $data, 6 * HOUR_IN_SECONDS);
+        return $data;
+    }
+
+    public function check_for_plugin_update($transient) {
+        if (!is_object($transient)) {
+            return $transient;
+        }
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        if (empty($api_url)) {
+            return $transient;
+        }
+        $manifest = $this->fetch_update_manifest(false);
+        if (!is_array($manifest) || empty($manifest['version'])) {
+            return $transient;
+        }
+
+        $plugin_file = plugin_basename(__FILE__);
+        $package_url = $this->get_trusted_package_url($api_url);
+        $homepage = !empty($manifest['homepage']) ? esc_url_raw($manifest['homepage']) : 'https://github.com/TylerHats/OmniBanner';
+        $icons = (isset($manifest['icons']) && is_array($manifest['icons'])) ? $manifest['icons'] : array();
+
+        $item = (object) array(
+            'id' => $package_url,
+            'slug' => 'omnibanner',
+            'plugin' => $plugin_file,
+            'new_version' => sanitize_text_field($manifest['version']),
+            'url' => $homepage,
+            'package' => $package_url,
+            'icons' => $icons,
+            'tested' => isset($manifest['tested']) ? sanitize_text_field($manifest['tested']) : '6.8',
+            'requires' => isset($manifest['requires']) ? sanitize_text_field($manifest['requires']) : '5.8',
+            'requires_php' => isset($manifest['requires_php']) ? sanitize_text_field($manifest['requires_php']) : '7.4',
+        );
+
+        if (!isset($transient->response) || !is_array($transient->response)) {
+            $transient->response = array();
+        }
+        if (!isset($transient->no_update) || !is_array($transient->no_update)) {
+            $transient->no_update = array();
+        }
+
+        if (version_compare(OMNIBANNER_VERSION, $item->new_version, '<')) {
+            $transient->response[$plugin_file] = $item;
+            unset($transient->no_update[$plugin_file]);
+        } else {
+            $transient->no_update[$plugin_file] = $item;
+            unset($transient->response[$plugin_file]);
+        }
+        return $transient;
+    }
+
+    public function filter_stale_update_transient($transient) {
+        if (!is_object($transient)) {
+            return $transient;
+        }
+        $plugin_file = plugin_basename(__FILE__);
+        if (
+            isset($transient->response) &&
+            is_array($transient->response) &&
+            isset($transient->response[$plugin_file])
+        ) {
+            $entry = $transient->response[$plugin_file];
+            $remote_ver = is_object($entry) && isset($entry->new_version) ? (string) $entry->new_version : '';
+            if ($remote_ver !== '' && version_compare(OMNIBANNER_VERSION, $remote_ver, '>=')) {
+                if (!isset($transient->no_update) || !is_array($transient->no_update)) {
+                    $transient->no_update = array();
+                }
+                $transient->no_update[$plugin_file] = $entry;
+                unset($transient->response[$plugin_file]);
+            }
+        }
+        return $transient;
+    }
+
+    public function plugin_update_info($result, $action, $args) {
+        if ($action !== 'plugin_information' || !is_object($args) || empty($args->slug) || $args->slug !== 'omnibanner') {
+            return $result;
+        }
+        $manifest = $this->fetch_update_manifest(false);
+        if (!is_array($manifest) || empty($manifest['version'])) {
+            return $result;
+        }
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        $package_url = $this->get_trusted_package_url($api_url);
+
+        $sections = array();
+        if (isset($manifest['sections']) && is_array($manifest['sections'])) {
+            foreach ($manifest['sections'] as $key => $val) {
+                $sections[sanitize_key($key)] = wp_kses_post((string) $val);
+            }
+        }
+
+        $info = new stdClass();
+        $info->name = isset($manifest['name']) ? sanitize_text_field($manifest['name']) : 'OmniBanner';
+        $info->slug = 'omnibanner';
+        $info->version = sanitize_text_field($manifest['version']);
+        $info->author = isset($manifest['author']) ? wp_kses_post($manifest['author']) : 'Tyler Hatfield';
+        $info->homepage = !empty($manifest['homepage']) ? esc_url_raw($manifest['homepage']) : 'https://github.com/TylerHats/OmniBanner';
+        $info->requires = isset($manifest['requires']) ? sanitize_text_field($manifest['requires']) : '5.8';
+        $info->tested = isset($manifest['tested']) ? sanitize_text_field($manifest['tested']) : '6.8';
+        $info->requires_php = isset($manifest['requires_php']) ? sanitize_text_field($manifest['requires_php']) : '7.4';
+        $info->last_updated = isset($manifest['last_updated']) ? sanitize_text_field($manifest['last_updated']) : '';
+        $info->download_link = $package_url;
+        $info->sections = $sections;
+        $info->icons = (isset($manifest['icons']) && is_array($manifest['icons'])) ? $manifest['icons'] : array();
+        $info->external = true;
+        return $info;
+    }
+
+    public function verify_and_download_package($reply, $package, $upgrader, $hook_extra = array()) {
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        $expected_pkg = $this->get_trusted_package_url($api_url);
+        if (empty($expected_pkg) || $package !== $expected_pkg) {
+            return $reply;
+        }
+
+        $manifest = $this->fetch_update_manifest(true);
+        if (!is_array($manifest) || empty($manifest['sha256'])) {
+            return new WP_Error('omnibanner_manifest_error', __('Could not verify update checksum from OmniBanner server.', 'omnibanner'));
+        }
+
+        if (!function_exists('wp_tempnam')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+        $tmpfile = wp_tempnam('omnibanner-update.zip');
+        if (!$tmpfile) {
+            return new WP_Error('omnibanner_tmp_error', __('Could not create temporary file for plugin update.', 'omnibanner'));
+        }
+
+        $args = array_merge($this->http_args(30), array(
+            'stream' => true,
+            'filename' => $tmpfile,
+        ));
+        $response = wp_remote_get($expected_pkg, $args);
+        if (is_wp_error($response)) {
+            @unlink($tmpfile);
+            return $response;
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        if ($code !== 200 || !file_exists($tmpfile)) {
+            @unlink($tmpfile);
+            return new WP_Error('omnibanner_download_error', sprintf(__('Update package download returned HTTP %d.', 'omnibanner'), $code));
+        }
+
+        $actual_sha = strtolower((string) hash_file('sha256', $tmpfile));
+        $expected_sha = strtolower((string) $manifest['sha256']);
+        if (!hash_equals($expected_sha, $actual_sha)) {
+            @unlink($tmpfile);
+            return new WP_Error('omnibanner_sha256_mismatch', __('Downloaded plugin package failed SHA-256 verification.', 'omnibanner'));
+        }
+
+        return $tmpfile;
+    }
+
+    public function after_plugin_upgrade($upgrader, $hook_extra) {
+        if (!is_array($hook_extra) || empty($hook_extra['type']) || $hook_extra['type'] !== 'plugin') {
+            return;
+        }
+        $plugin_file = plugin_basename(__FILE__);
+        $plugins = isset($hook_extra['plugins']) && is_array($hook_extra['plugins'])
+            ? $hook_extra['plugins']
+            : (!empty($hook_extra['plugin']) ? array($hook_extra['plugin']) : array());
+        if (in_array($plugin_file, $plugins, true)) {
+            delete_transient('omnibanner_update_manifest');
+            delete_site_transient('update_plugins');
+        }
+    }
+
+    public function maybe_report_version_upgrade() {
+        $reported = get_option('omnibanner_reported_version', '');
+        if ($reported === OMNIBANNER_VERSION) {
+            return;
+        }
+        delete_transient('omnibanner_update_manifest');
+        delete_site_transient('update_plugins');
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        $site_key = get_option('omnibanner_site_key', '');
+        if (empty($api_url) || empty($site_key)) {
+            update_option('omnibanner_reported_version', OMNIBANNER_VERSION);
+            return;
+        }
+
+        $args = $this->http_args(6, array(
+            'Content-Type' => 'application/json',
+            'X-OmniBanner-Site-Key' => $site_key,
+        ));
+        $args['body'] = wp_json_encode(array(
+            'domain' => wp_parse_url(home_url(), PHP_URL_HOST),
+            'site_url' => home_url(),
+            'site_name' => get_bloginfo('name'),
+            'wp_version' => get_bloginfo('version'),
+            'plugin_version' => OMNIBANNER_VERSION,
+        ));
+        $res = wp_remote_post($api_url . '/api/sites/heartbeat', $args);
+        if (!is_wp_error($res) && wp_remote_retrieve_response_code($res) === 200) {
+            update_option('omnibanner_reported_version', OMNIBANNER_VERSION);
+            $data = json_decode(wp_remote_retrieve_body($res), true);
+            if (is_array($data)) {
+                if (isset($data['settings']) && is_array($data['settings'])) {
+                    update_option('omnibanner_site_config', wp_json_encode($data['settings']));
+                }
+                if (isset($data['branding']) && is_array($data['branding'])) {
+                    $this->apply_remote_branding($api_url, $data['branding']);
+                }
+            }
+        }
+    }
+
+    public function ajax_check_updates() {
+        check_ajax_referer('omnibanner_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Unauthorized access.', 'omnibanner')));
+        }
+        $api_url = $this->sanitize_api_url(get_option('omnibanner_api_url', ''));
+        if (empty($api_url)) {
+            wp_send_json_error(array('message' => __('Connect an OmniBanner server before checking for updates.', 'omnibanner')));
+        }
+        delete_transient('omnibanner_update_manifest');
+        $manifest = $this->fetch_update_manifest(true);
+        if (!is_array($manifest) || empty($manifest['version'])) {
+            wp_send_json_error(array('message' => __('Unable to fetch update manifest from OmniBanner server.', 'omnibanner')));
+        }
+
+        delete_site_transient('update_plugins');
+        if (!function_exists('wp_update_plugins')) {
+            require_once ABSPATH . 'wp-includes/update.php';
+        }
+        wp_update_plugins();
+
+        $remote_ver = sanitize_text_field($manifest['version']);
+        $update_available = version_compare(OMNIBANNER_VERSION, $remote_ver, '<');
+        wp_send_json_success(array(
+            'installed_version' => OMNIBANNER_VERSION,
+            'remote_version' => $remote_ver,
+            'update_available' => $update_available,
+            'sha256_prefix' => substr((string) $manifest['sha256'], 0, 12),
+            'plugins_url' => admin_url('plugins.php'),
+        ));
     }
 }
 

@@ -192,4 +192,45 @@ jQuery(document).ready(function ($) {
             }
         });
     });
+
+    $('#omnibanner-check-updates-btn').on('click', function (e) {
+        e.preventDefault();
+        const $btn = $(this);
+        const $status = $('#omnibanner-update-status');
+        $btn.text(omnibanner_admin.i18n.checking_updates).prop('disabled', true);
+        $status.empty().append($('<span class="diag-badge gray">').text('Checking...'));
+
+        $.ajax({
+            url: omnibanner_admin.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'omnibanner_check_updates',
+                nonce: omnibanner_admin.nonce
+            },
+            success: function (response) {
+                $status.empty();
+                if (response.success) {
+                    const d = response.data;
+                    if (d.update_available) {
+                        $status.append($('<span class="diag-badge red">').text('Update available: v' + d.remote_version));
+                        showAdminNotice('OmniBanner v' + d.remote_version + ' is available on your server. Install or enable auto-updates on the Plugins page.', 'info');
+                    } else {
+                        $status.append($('<span class="diag-badge green">').text('Up to date (v' + d.remote_version + ')'));
+                        showAdminNotice('OmniBanner is up to date (v' + d.installed_version + ', SHA-256 ' + d.sha256_prefix + '...).', 'success');
+                    }
+                } else {
+                    const msg = (response.data && response.data.message) || 'Update check failed.';
+                    $status.append($('<span class="diag-badge red">').text('Check failed'));
+                    showAdminNotice(msg, 'error');
+                }
+            },
+            error: function () {
+                $status.empty().append($('<span class="diag-badge red">').text('AJAX error'));
+                showAdminNotice('Failed to contact WordPress update checker.', 'error');
+            },
+            complete: function () {
+                $btn.text(omnibanner_admin.i18n.check_updates_btn).prop('disabled', false);
+            }
+        });
+    });
 });

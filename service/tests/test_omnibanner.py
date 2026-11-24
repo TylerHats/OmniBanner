@@ -953,6 +953,74 @@ class OmniBannerTestSuite(unittest.TestCase):
         self.assertGreaterEqual(imp.json()["restored"]["sites"], 1)
         self.assertGreaterEqual(imp.json()["restored"]["subscribers"], 1)
 
+    # --- 12. Self-Hosted WordPress Auto-Update Manifest, Checksum & Fleet Outdated Flag ---
+
+    def test_12_self_hosted_plugin_manifest_download_and_outdated_badge(self) -> None:
+        import hashlib
+        import zipfile
+
+        self._complete_default_setup()
+        self._login_admin()
+
+        manifest_res = self.client.get("/api/public/plugin/manifest.json")
+        self.assertEqual(manifest_res.status_code, 200)
+        manifest = manifest_res.json()
+        self.assertEqual(manifest["slug"], "omnibanner")
+        self.assertEqual(manifest["plugin"], "omnibanner/omnibanner.php")
+        self.assertEqual(manifest["version"], "2.1.0")
+        self.assertRegex(manifest["sha256"], r"^[a-f0-9]{64}$")
+        self.assertTrue(manifest["download_url"].endswith("/api/public/plugin/download"))
+        self.assertIn("2.1.0", manifest["sections"]["changelog"])
+
+        pkg_res = self.client.get("/api/public/plugin/download")
+        self.assertEqual(pkg_res.status_code, 200)
+        actual_sha = hashlib.sha256(pkg_res.content).hexdigest()
+        self.assertEqual(actual_sha, manifest["sha256"])
+        self.assertEqual(pkg_res.headers.get("x-omnibanner-sha256"), actual_sha)
+        with zipfile.ZipFile(io.BytesIO(pkg_res.content)) as zf:
+            self.assertIn("omnibanner/omnibanner.php", zf.namelist())
+            php_src = zf.read("omnibanner/omnibanner.php").decode("utf-8")
+            self.assertIn("Update URI: false", php_src)
+
+        pair = self.client.post(
+            "/api/sites/pairing-tokens",
+            json={"preset_name": "WP Updater Test", "wp_url": "https://wp-upd.example.com"},
+        ).json()
+        claim = self.client.post(
+            "/api/sites/claim",
+            json={
+                "token": pair["token"],
+                "domain": "wp-upd.example.com",
+                "site_url": "https://wp-upd.example.com",
+                "site_name": "WP Updater Test",
+                "wp_version": "6.8",
+                "plugin_version": "2.0.0",
+            },
+        )
+        self.assertEqual(claim.status_code, 200)
+        site_key = claim.json()["site_key"]
+
+        sites_before = self.client.get("/api/sites").json()
+        target_before = next(s for s in sites_before if s["domain"] == "wp-upd.example.com")
+        self.assertEqual(target_before["latest_plugin_version"], "2.1.0")
+        self.assertTrue(target_before["update_available"])
+
+        hb = self.client.post(
+            "/api/sites/heartbeat",
+            headers={"X-OmniBanner-Site-Key": site_key},
+            json={
+                "domain": "wp-upd.example.com",
+                "site_url": "https://wp-upd.example.com",
+                "wp_version": "6.8",
+                "plugin_version": "2.1.0",
+            },
+        )
+        self.assertEqual(hb.status_code, 200)
+
+        sites_after = self.client.get("/api/sites").json()
+        target_after = next(s for s in sites_after if s["domain"] == "wp-upd.example.com")
+        self.assertFalse(target_after["update_available"])
+
 
 if __name__ == "__main__":
     unittest.main()

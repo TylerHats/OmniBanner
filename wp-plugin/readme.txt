@@ -4,7 +4,7 @@ Tags: banner, announcement, maintenance, uptime kuma, notification
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.0.0
+Stable tag: 2.1.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -30,6 +30,7 @@ When connected, the plugin communicates with your configured OmniBanner server i
 1. **Onboarding & Sync (Admin only):** Sends the site domain, site URL, site name, WordPress version, and plugin version to `/api/sites/claim` and `/api/sites/heartbeat` to register the site and retrieve branding/display settings.
 2. **Diagnostics (Admin only, manual button):** Sends requests to `/api/health`, `/api/public/info`, and `/api/public/banners` to verify connectivity and latency.
 3. **Frontend Banner Display (Visitors):** Visitors' browsers send a GET request to `/api/public/banners` with the site domain, site ID, current path, and anonymous audience flag (`guest` or `logged_in`). When a banner is shown, dismissed, or its CTA button is clicked, a non-identifying counter event is sent to `/api/public/banner/{id}/event`. No visitor PII, cookies, or user emails are transmitted to OmniBanner.
+4. **Self-Hosted Plugin Updates (Admin / WP Cron):** WordPress checks `/api/public/plugin/manifest.json` on your connected OmniBanner server for new versions and downloads signed/SHA-256 verified updates from `/api/public/plugin/download`.
 
 Links:
 * Project source & documentation: https://github.com/TylerHats/OmniBanner
@@ -52,6 +53,11 @@ No. WordPress outputs static script configuration for the OmniBanner endpoint, a
 No. Nothing is sent externally until you connect your own self-hosted OmniBanner server.
 
 == Changelog ==
+
+= 2.1.0 =
+* Added self-hosted WordPress plugin updates directly from your connected OmniBanner server (`Update URI: false`, native Plugins auto-update toggle, changelog modal, and SHA-256 package checksum verification).
+* Added automatic post-upgrade heartbeat reporting back to OmniBanner so outdated-version badges clear automatically.
+* Added a manual "Check for Updates" control under Settings -> OmniBanner.
 
 = 2.0.0 =
 * Added one-paste Onboarding Link pairing and deep-link confirmation flow.
